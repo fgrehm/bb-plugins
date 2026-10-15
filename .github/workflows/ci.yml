@@ -57,8 +57,6 @@ jobs:
         include:
           - plugin: favicon
             command: pnpm run typecheck
-          - plugin: jomo
-            command: pnpm run typecheck
           - plugin: pi-extras
             command: pnpm run lint && pnpm test && pnpm run test:components
           - plugin: review-workspace

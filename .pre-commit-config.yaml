@@ -24,14 +24,6 @@ repos:
         groups: [favicon, typecheck]
         pass_filenames: false
 
-      - id: jomo-typecheck
-        name: jomo typecheck
-        entry: bash -c 'cd plugins/jomo && pnpm run typecheck'
-        language: system
-        files: ^plugins/jomo/
-        groups: [jomo, typecheck]
-        pass_filenames: false
-
       - id: pi-extras-typecheck
         name: pi-extras typecheck
         entry: bash -c 'cd plugins/pi-extras && pnpm run lint'
