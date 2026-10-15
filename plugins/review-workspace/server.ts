@@ -17,6 +17,13 @@ import {
 } from "./lib/review-model";
 import { inspectRasterAsset, isRasterImagePath } from "./lib/review-assets";
 import { validateTour, type TourStep } from "./lib/tours";
+// A refresh captures at most this many changed files (the rest are reported as
+// outside the snapshot), and the host accepts at most MAX_PATCH_PATHS paths per
+// environment diff-patch call: it answers "HTTP 400: Too big: expected array to
+// have <=50 items" beyond that (observed on bb 0.6.37 with a 113-file commit).
+const MAX_SNAPSHOT_FILES = 100;
+const MAX_PATCH_PATHS = 50;
+
 const imageInfoShape = z
   .object({
     path: z.string(),
@@ -1152,30 +1159,34 @@ export default async function plugin(bb: BbPluginApi) {
       );
     const paths = listing.files
       .filter((file) => !file.binary)
-      .slice(0, 100)
+      .slice(0, MAX_SNAPSHOT_FILES)
       .map((file) => file.path);
-    const patches = paths.length
-      ? await bb.sdk.environments.diffPatch({
-          environmentId: thread.environmentId,
-          target: {
-            type: target.type,
-            ...(target.type === "commit"
-              ? { sha: target.sha }
-              : target.type === "branch_committed" || target.type === "all"
-                ? { mergeBaseBranch: target.mergeBaseBranch }
-                : {}),
-          } as PatchTarget,
-          paths,
-        })
-      : { outcome: "available" as const, patches: [] };
-    if (patches.outcome !== "available")
-      throw new Error(
-        "message" in patches ? patches.message : patches.failure.message,
-      );
-    const files = listing.files.slice(0, 100);
-    const patchByPath = new Map(
-      patches.patches.map((patch) => [patch.path, patch]),
-    );
+    const patchTarget = {
+      type: target.type,
+      ...(target.type === "commit"
+        ? { sha: target.sha }
+        : target.type === "branch_committed" || target.type === "all"
+          ? { mergeBaseBranch: target.mergeBaseBranch }
+          : {}),
+    } as PatchTarget;
+    // The host caps how many paths one diff-patch call may carry, so large
+    // changesets are fetched in batches and merged here.
+    const patches: Array<{ path: string; patch: string; truncated: boolean }> =
+      [];
+    for (let index = 0; index < paths.length; index += MAX_PATCH_PATHS) {
+      const batch = await bb.sdk.environments.diffPatch({
+        environmentId: thread.environmentId,
+        target: patchTarget,
+        paths: paths.slice(index, index + MAX_PATCH_PATHS),
+      });
+      if (batch.outcome !== "available")
+        throw new Error(
+          "message" in batch ? batch.message : batch.failure.message,
+        );
+      patches.push(...batch.patches);
+    }
+    const files = listing.files.slice(0, MAX_SNAPSHOT_FILES);
+    const patchByPath = new Map(patches.map((patch) => [patch.path, patch]));
     const diffFileTarget =
       target.type === "commit"
         ? { target: "commit" as const, sha: target.sha }
@@ -1317,7 +1328,7 @@ export default async function plugin(bb: BbPluginApi) {
     const snapshot = createHash("sha256")
       .update(encodeTarget(target))
       .update(JSON.stringify(listing.files))
-      .update(patches.patches.map((p) => p.patch).join("\n"))
+      .update(patches.map((patch) => patch.patch).join("\n"))
       .update(
         JSON.stringify(
           fileContents.map((item) => ({
@@ -1422,6 +1433,8 @@ export default async function plugin(bb: BbPluginApi) {
             ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY created_at DESC, rowid DESC) AS position
           FROM review_revisions
         ), recent AS (
+          -- Read a wider pool than the response cap so an older review with
+          -- pending feedback can still surface; the handler trims to 50.
           SELECT * FROM ranked WHERE position = 1
           ORDER BY created_at DESC, insertion_order DESC LIMIT 100
         )

@@ -1029,6 +1029,112 @@ describe("Review Workspace server", () => {
     expect(diffFile).toHaveBeenCalledTimes(6);
   });
 
+  it("keeps the recent-review list within its declared output cap", async () => {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "review-workspace",
+      sdk: {
+        threads: {
+          get: async ({ threadId }: { threadId: string }) => ({
+            id: threadId,
+            title: `Thread ${threadId}`,
+            titleFallback: threadId,
+            visibility: "visible",
+            archivedAt: null,
+            deletedAt: null,
+            projectId: "project-1",
+            environmentId: "env-1",
+          }),
+        },
+        projects: { list: async () => [{ id: "project-1", name: "Project" }] },
+      } as any,
+    });
+    await plugin(bb);
+    const db = bb.storage.database();
+    // More threads with saved reviews than one response may declare.
+    for (let index = 0; index < 60; index += 1) {
+      db.prepare(
+        "INSERT INTO review_revisions (id, thread_id, snapshot, created_at, target) VALUES (?, ?, ?, ?, 'uncommitted')",
+      ).run(`review-${index}`, `thread-${index}`, `snapshot-${index}`, index);
+    }
+    const result = (await harness.behavior.callRpc("recentReviews", {})) as {
+      reviews: Array<{ threadId: string }>;
+    };
+    expect(result.reviews).toHaveLength(50);
+    // Newest first.
+    expect(result.reviews[0]!.threadId).toBe("thread-59");
+  });
+
+  it("batches environment diff-patch calls at the host's 50-path limit", async () => {
+    // The host answers "HTTP 400: Too big: expected array to have <=50 items"
+    // when one diff-patch call carries more paths, so a 113-file changeset must
+    // be fetched in batches instead of failing the whole refresh.
+    const paths = Array.from(
+      { length: 113 },
+      (_, index) => `src/file-${index}.ts`,
+    );
+    const listing = {
+      outcome: "available" as const,
+      files: paths.map((path) => ({
+        path,
+        previousPath: null,
+        changeKind: "modified" as const,
+        additions: 1,
+        deletions: 1,
+        binary: false,
+        loadMode: "auto" as const,
+        origin: "tracked" as const,
+      })),
+      initialPatches: [],
+      mergeBaseRef: null,
+      shortstat: `${paths.length} files changed`,
+      truncated: false,
+    };
+    const patchFor = (path: string) =>
+      `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,1 +1,2 @@\n context\n+more\n`;
+    const batchSizes: number[] = [];
+    const diffFiles = vi.fn(async () => listing);
+    const diffPatch = vi.fn(
+      async ({ paths: requested }: { paths: string[] }) => {
+        batchSizes.push(requested.length);
+        return {
+          outcome: "available" as const,
+          patches: requested.map((path) => ({
+            path,
+            patch: patchFor(path),
+            truncated: false,
+          })),
+        };
+      },
+    );
+    const diffFile = vi.fn(async ({ side }: { side: "old" | "new" }) => ({
+      path: "src/file-0.ts",
+      content: side === "old" ? "context\n" : "context\nmore\n",
+      contentEncoding: "utf8" as const,
+      sizeBytes: 16,
+    }));
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "review-workspace",
+      sdk: {
+        threads: { get: async () => ({ environmentId: "env-1" }) },
+        environments: { diffFiles, diffPatch, diffFile },
+      },
+    });
+    await plugin(bb);
+
+    const result = (await harness.behavior.callRpc("refreshReview", {
+      threadId: "thread-many-files",
+    })) as { review: { files: Array<{ path: string; patch: string }> } };
+
+    // No request may exceed the host's limit, and the snapshot keeps its bound.
+    expect(Math.max(...batchSizes)).toBeLessThanOrEqual(50);
+    expect(batchSizes.reduce((total, size) => total + size, 0)).toBe(100);
+    expect(batchSizes.length).toBeGreaterThan(1);
+    expect(result.review.files).toHaveLength(100);
+    expect(result.review.files.every((file) => file.patch.length > 0)).toBe(
+      true,
+    );
+  });
+
   it("captures immutable bounded image-side assets and removes them with their revision", async () => {
     const pngBytes = (shade: number) => {
       const bytes = Buffer.alloc(25);

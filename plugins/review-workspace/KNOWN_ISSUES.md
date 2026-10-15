@@ -4,7 +4,7 @@
 
 - Review snapshots are immutable. Refreshing creates a new revision and carries unresolved comment threads and the review note forward. Resolved comments stay on their original revision; comments are never silently remapped.
 - Tours stored with the retired per-step body/anchors/card format remain preserved but are not rendered by the current block-based Tour view. Author a new tour on that revision if needed; files and comments remain accessible.
-- A refresh includes at most 100 changed files. The environment API may truncate individual patches. Since-viewed comparisons with missing identities, truncated sides, or incompatible bases are marked unknown rather than unchanged.
+- A refresh includes at most 100 changed files, fetched in batches of 50 paths because the host rejects a single environment diff-patch request that carries more. The environment API may truncate individual patches. Since-viewed comparisons with missing identities, truncated sides, or incompatible bases are marked unknown rather than unchanged.
 
 ## Diff limitations
 

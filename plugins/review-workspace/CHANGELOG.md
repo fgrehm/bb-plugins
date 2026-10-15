@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Fix reviews of large changesets failing with `HTTP 400: Too big: expected array to have <=50 items`: environment diff-patch requests are now batched at the host's 50-path limit, so a 100-file snapshot still captures every patch.
 - Review on a phone with a bottom-sheet comment composer that shows the file and line context it is anchored to; dismissing the sheet with a typed draft keeps it anchored behind a "Resume draft" banner.
 - Keep phone chrome to three rows: the header holds the back link, title, and a `•••` menu (revision history, full screen, review target), the mode row holds Files/Tour plus the line wrap and unified/split layout toggles, and one document toolbar row holds prev/next, the changed-file sheet trigger, More, and Viewed & next.
 - Open the full-width changed-file sheet for per-file status, add/delete counts, viewed state, open-thread badges, path search, and comment/viewed filters; per-file headers use compact icon actions and truncate long paths.
