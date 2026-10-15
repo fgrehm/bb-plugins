@@ -4069,7 +4069,9 @@ function ReviewPanel({ threadId }: { threadId: string }) {
               ) : null}
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 <span className="text-[11px] text-muted-foreground">
-                  {reviewedCount} of {tour.steps.length} sections reviewed
+                  <span aria-live="polite">
+                    {reviewedCount} of {tour.steps.length} sections reviewed
+                  </span>
                 </span>
                 <Button
                   size="sm"
@@ -4995,7 +4997,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                   selection &&
                   body.trim() &&
                   mobilePanel === null ? (
-                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+                    <div
+                      role="status"
+                      className="mb-3 flex flex-wrap items-center gap-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs"
+                    >
                       <span>
                         Unsent draft remains anchored to{" "}
                         <code>{selectionPath}</code>
@@ -5049,7 +5054,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                       !selectionSurface?.startsWith(
                         `tour:${activeTourStepId}:`,
                       ))) ? (
-                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+                    <div
+                      role="status"
+                      className="mb-3 flex flex-wrap items-center gap-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs"
+                    >
                       <span>
                         Unsent draft remains anchored to{" "}
                         <code>{selectionPath}</code>.
@@ -5375,13 +5383,13 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                 data-bb-plugin-root=""
                 data-bb-portaled-overlay=""
               >
-                <Drawer.Overlay className="fixed inset-0 z-40 bg-black/40" />
+                <Drawer.Overlay className="fixed inset-0 z-40 bg-black/40 motion-reduce:transition-none motion-reduce:animate-none" />
                 <Drawer.Content
                   data-bb-plugin={pluginId}
                   data-bb-plugin-root=""
                   data-bb-portaled-overlay=""
                   aria-label="Comment composer"
-                  className="fixed bottom-0 left-0 right-0 z-50 mx-auto max-w-lg rounded-t-xl border bg-background p-4 shadow-2xl outline-none"
+                  className="fixed bottom-0 left-0 right-0 z-50 mx-auto max-w-lg rounded-t-xl border bg-background p-4 shadow-2xl outline-none motion-reduce:transition-none motion-reduce:animate-none"
                   style={{
                     paddingBottom: "calc(env(safe-area-inset-bottom) + 1rem)",
                   }}

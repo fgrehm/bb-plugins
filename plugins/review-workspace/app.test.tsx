@@ -535,6 +535,11 @@ describe("Review Workspace app", () => {
     });
     fireEvent.click(slot.getByRole("button", { name: "Tour" }));
     // In Tour mode the code draft lives behind "Resume draft" on the banner.
+    expect(
+      slot
+        .getByRole("button", { name: "Resume draft" })
+        .closest("[role='status']"),
+    ).toBeTruthy();
     fireEvent.click(slot.getByRole("button", { name: "Resume draft" }));
     const resumed = (
       await slot.findAllByLabelText("Comment", { exact: true })
@@ -2984,7 +2989,11 @@ describe("Review Workspace app", () => {
       expect(
         slot.getByRole("button", { name: "Mark section reviewed" }),
       ).toBeTruthy();
-      expect(slot.getByText("1 of 2 sections reviewed")).toBeTruthy();
+      expect(
+        slot
+          .getByText("1 of 2 sections reviewed")
+          .closest('[aria-live="polite"]'),
+      ).toBeTruthy();
     });
     slot.lifecycle.unmount();
   });
