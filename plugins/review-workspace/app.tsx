@@ -218,8 +218,8 @@ function StateChip({
   const tones = {
     muted: "bg-muted text-muted-foreground",
     primary: "bg-primary text-primary-foreground",
-    emerald: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-    amber: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+    emerald: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-400",
+    amber: "bg-amber-500/15 text-amber-800 dark:text-amber-400",
   };
   return (
     <span
@@ -836,7 +836,7 @@ function TourCardView({ card }: { card: ReviewTourCard }) {
           <span
             className={
               test.status === "missing"
-                ? "text-destructive"
+                ? "text-destructive dark:text-red-400"
                 : "text-muted-foreground"
             }
           >
@@ -1168,7 +1168,7 @@ function CommentEditor({
           <p
             id={errorId}
             role="alert"
-            className="px-3 pb-2 text-xs text-destructive [overflow-wrap:anywhere]"
+            className="px-3 pb-2 text-xs text-destructive dark:text-red-400 [overflow-wrap:anywhere]"
           >
             {error}
           </p>
@@ -1706,7 +1706,7 @@ function ReviewSummary({
         {error ? (
           <p
             role="alert"
-            className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive [overflow-wrap:anywhere]"
+            className="mb-3 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive dark:text-red-400 [overflow-wrap:anywhere]"
           >
             {error}
           </p>
@@ -3373,7 +3373,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
           </label>
         </div>
         {rangeInputError ? (
-          <p role="alert" className="mt-2 text-xs text-destructive">
+          <p
+            role="alert"
+            className="mt-2 text-xs text-destructive dark:text-red-400"
+          >
             {rangeInputError}
           </p>
         ) : null}
@@ -3784,7 +3787,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                   </Button>
                 ) : null}
                 {deferredError ? (
-                  <p role="alert" className="text-destructive">
+                  <p
+                    role="alert"
+                    className="text-destructive dark:text-red-400"
+                  >
                     {deferredError}
                   </p>
                 ) : null}
@@ -3804,7 +3810,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                   </p>
                 ) : null}
                 {candidate.truncated ? (
-                  <p className="mb-2 text-xs text-amber-700 dark:text-amber-300">
+                  <p className="mb-2 text-xs text-amber-800 dark:text-amber-300">
                     This patch is truncated. Comments refer only to visible
                     snapshot lines.
                   </p>
@@ -4051,7 +4057,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                       <span className="truncate font-mono">
                         {file.path.split("/").pop()}
                       </span>
-                      <span className="shrink-0 tabular-nums text-emerald-700 dark:text-emerald-400">
+                      <span className="shrink-0 tabular-nums text-emerald-800 dark:text-emerald-400">
                         +{file.additions}
                       </span>
                       <span className="shrink-0 tabular-nums text-red-700 dark:text-red-400">
@@ -4280,7 +4286,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
               </button>
             ) : null}
             <button
-              className="block w-full rounded px-2 py-2 text-left text-xs text-destructive hover:bg-muted"
+              className="block w-full rounded px-2 py-2 text-left text-xs text-destructive dark:text-red-400 hover:bg-muted"
               onClick={() => void clearPrevious()}
               disabled={busy || revisions.length < 2}
             >
@@ -4341,7 +4347,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
       {error && !feedbackOpen ? (
         <p
           role="alert"
-          className="m-3 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+          className="m-3 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive dark:text-red-400"
         >
           {error}
         </p>
@@ -4531,10 +4537,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                                 candidate.status,
                               );
                               return kind === "added"
-                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                ? "bg-emerald-500/15 text-emerald-800 dark:text-emerald-400"
                                 : kind === "deleted"
                                   ? "bg-red-500/15 text-red-700 dark:text-red-400"
-                                  : "bg-amber-500/15 text-amber-700 dark:text-amber-400";
+                                  : "bg-amber-500/15 text-amber-800 dark:text-amber-400";
                             })()}`}
                           >
                             {candidate.status[0]?.toUpperCase()}
@@ -4553,7 +4559,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                               </span>
                             </span>
                             <span className="mt-0.5 flex gap-2 text-[11px] font-normal tabular-nums">
-                              <span className="text-emerald-700 dark:text-emerald-400">
+                              <span className="text-emerald-800 dark:text-emerald-400">
                                 +{candidate.additions}
                               </span>
                               <span className="text-red-700 dark:text-red-400">
@@ -4832,7 +4838,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                               </p>
                             ) : null}
                             {revisionDelta?.reason ? (
-                              <p className="mt-2 text-amber-700 dark:text-amber-300">
+                              <p className="mt-2 text-amber-800 dark:text-amber-300">
                                 {revisionDelta.reason}
                               </p>
                             ) : null}
@@ -4970,7 +4976,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                         {revisionDelta?.reason ? (
                           <p
                             role="status"
-                            className="mt-2 text-amber-700 dark:text-amber-300"
+                            className="mt-2 text-amber-800 dark:text-amber-300"
                           >
                             {revisionDelta.reason}
                           </p>
@@ -5238,10 +5244,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                             aria-hidden="true"
                             className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold ${
                               kind === "added"
-                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                ? "bg-emerald-500/15 text-emerald-800 dark:text-emerald-400"
                                 : kind === "deleted"
                                   ? "bg-red-500/15 text-red-700 dark:text-red-400"
-                                  : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                                  : "bg-amber-500/15 text-amber-800 dark:text-amber-400"
                             }`}
                           >
                             {candidate.status[0]?.toUpperCase()}
@@ -5261,7 +5267,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                             </span>
                           </span>
                           <span className="shrink-0 gap-2 text-[11px] tabular-nums">
-                            <span className="text-emerald-700 dark:text-emerald-400">
+                            <span className="text-emerald-800 dark:text-emerald-400">
                               +{candidate.additions}
                             </span>
                             <span className="text-red-700 dark:text-red-400">
@@ -5534,7 +5540,7 @@ function RecentReviews() {
             role="alert"
             className="rounded-lg border border-destructive/25 bg-destructive/5 p-4 text-sm"
           >
-            <p className="font-medium text-destructive">
+            <p className="font-medium text-destructive dark:text-red-400">
               Could not load recent reviews
             </p>
             <p className="mt-1 break-words text-muted-foreground">{error}</p>
