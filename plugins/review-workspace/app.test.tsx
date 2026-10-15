@@ -2188,7 +2188,7 @@ describe("Review Workspace app", () => {
     });
     expect(slot.getAllByText("No matching files.").length).toBeGreaterThan(0);
     expect(slot.getAllByTestId("pierre-diff")).toHaveLength(1);
-    expect(slot.queryByRole("dialog")).toBeNull();
+    expect(slot.queryByRole("dialog", { name: "Review feedback" })).toBeNull();
     slot.lifecycle.unmount();
   });
 
@@ -2753,15 +2753,115 @@ describe("Review Workspace app", () => {
     // Dismiss the sheet, then reopen it: with zero results the trigger used to
     // be inert, which stranded the search that emptied the list.
     fireEvent.click(trigger);
-    expect(slot.queryByRole("listbox", { name: "Changed files" })).toBeNull();
+    expect(slot.queryByRole("dialog", { name: "Changed files" })).toBeNull();
     fireEvent.click(trigger);
-    expect(slot.queryByRole("listbox", { name: "Changed files" })).toBeTruthy();
+    expect(slot.queryByRole("dialog", { name: "Changed files" })).toBeTruthy();
     fireEvent.change(slot.getByLabelText("Search files on mobile"), {
       target: { value: "guide" },
     });
     await vi.waitFor(() => {
       expect(openedFileRow(slot, "docs/guide.md")).toBeTruthy();
     });
+    slot.lifecycle.unmount();
+  });
+
+  const twoFileReview = () => ({
+    ...reviewFixture(),
+    files: [
+      ...reviewFixture().files,
+      {
+        ...reviewFixture().files[0]!,
+        path: "docs/guide.md",
+        patch: patch.replaceAll("src/example.ts", "docs/guide.md"),
+      },
+    ],
+  });
+
+  it("moves focus into the file sheet, keeps Tab inside, and restores focus", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const slot = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "review/thread-ui" },
+      {
+        context: { projectId: "project-ui", threadId: "thread-ui" },
+        rpc: {
+          review: async () => ({ review: twoFileReview() }),
+          revisions: async () => ({ revisions: [] }),
+        } as any,
+      },
+    );
+    const trigger = await slot.findByLabelText("Changed file", { exact: true });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const sheet = await slot.findByRole("dialog", { name: "Changed files" });
+    await vi.waitFor(() => expect(document.activeElement).toBe(sheet));
+    // The sheet is modal: Tab from the last control wraps to the first.
+    const focusable = Array.from(
+      sheet.querySelectorAll<HTMLElement>("button, input, select"),
+    );
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    last.focus();
+    fireEvent.keyDown(sheet, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+    first.focus();
+    fireEvent.keyDown(sheet, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+    // Escape dismisses and focus returns to the control that opened it.
+    fireEvent.keyDown(sheet, { key: "Escape" });
+    await vi.waitFor(() => {
+      expect(slot.queryByRole("dialog", { name: "Changed files" })).toBeNull();
+    });
+    expect(document.activeElement).toBe(trigger);
+    slot.lifecycle.unmount();
+  });
+
+  it("gives the compare sheet a close control, Escape, and focus return", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const slot = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "review/thread-ui" },
+      {
+        context: { projectId: "project-ui", threadId: "thread-ui" },
+        rpc: {
+          review: async () => ({ review: reviewFixture() }),
+          revisions: async () => ({ revisions: [] }),
+          reviewEnvironment: async () => baseSuggestionRpc(),
+        } as any,
+      },
+    );
+    const actions = await slot.findByLabelText("Review actions");
+    fireEvent.click(actions);
+    fireEvent.click(
+      slot.getByRole("button", { name: "Change review target…" }),
+    );
+    const sheet = await slot.findByRole("dialog", {
+      name: "Compare or refresh",
+    });
+    await vi.waitFor(() => expect(document.activeElement).toBe(sheet));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Close" }));
+    await vi.waitFor(() => {
+      expect(
+        slot.queryByRole("dialog", { name: "Compare or refresh" }),
+      ).toBeNull();
+    });
+    // Focus returns to the menu that opened it, not to the body.
+    expect(document.activeElement).toBe(actions);
+    // Escape works too.
+    fireEvent.click(actions);
+    fireEvent.click(
+      slot.getByRole("button", { name: "Change review target…" }),
+    );
+    const reopened = await slot.findByRole("dialog", {
+      name: "Compare or refresh",
+    });
+    fireEvent.keyDown(reopened, { key: "Escape" });
+    await vi.waitFor(() => {
+      expect(
+        slot.queryByRole("dialog", { name: "Compare or refresh" }),
+      ).toBeNull();
+    });
+    expect(document.activeElement).toBe(actions);
     slot.lifecycle.unmount();
   });
 

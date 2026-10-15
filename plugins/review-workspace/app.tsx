@@ -479,6 +479,79 @@ const PierreReviewDiff = memo(function PierreReviewDiff({
  * surfaces stay as a light placeholder until the reader scrolls near them.
  * Once mounted they stay mounted, so scrolling back never re-tokenizes code.
  */
+const SHEET_FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Modal behaviour for the two hand-rolled phone sheets: moves focus inside on
+ * open, keeps Tab within the sheet, closes on Escape, and returns focus to the
+ * control that opened it. Focus lands on the sheet container rather than its
+ * first field, so opening a sheet does not raise the software keyboard.
+ */
+function useSheetFocus({
+  open,
+  containerRef,
+  restoreRef,
+  onClose,
+}: {
+  open: boolean;
+  containerRef: React.RefObject<HTMLElement | null>;
+  restoreRef: React.RefObject<HTMLElement | null>;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const container = containerRef.current;
+    const restoreTo =
+      restoreRef.current ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+    container?.focus({ preventScroll: true });
+    return () => {
+      if (restoreTo?.isConnected) restoreTo.focus({ preventScroll: true });
+    };
+  }, [open, containerRef, restoreRef]);
+
+  return (event: React.KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      onClose();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const container = containerRef.current;
+    if (!container) return;
+    const focusable = Array.from(
+      container.querySelectorAll<HTMLElement>(SHEET_FOCUSABLE_SELECTOR),
+    ).filter(
+      (element) =>
+        !element.hasAttribute("hidden") &&
+        element.getAttribute("aria-hidden") !== "true" &&
+        // `checkVisibility` is browser-only; jsdom has no layout to consult.
+        (typeof element.checkVisibility === "function"
+          ? element.checkVisibility()
+          : true),
+    );
+    if (!focusable.length) return;
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    const active = document.activeElement;
+    // The container itself is focusable (focus lands there on open), so treat
+    // it as the boundary in both directions.
+    const atEdge =
+      active === container || !container.contains(active) || active === null;
+    if (!event.shiftKey && (active === last || atEdge)) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && (active === first || atEdge)) {
+      event.preventDefault();
+      last.focus();
+    }
+  };
+}
+
 function LazyDiffSurface({
   rootMargin = "700px",
   placeholder,
@@ -1799,6 +1872,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     new Set(),
   );
   const tourStepsRef = useRef<HTMLDetailsElement | null>(null);
+  const fileSheetRef = useRef<HTMLDivElement | null>(null);
+  const fileTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const compareSheetRef = useRef<HTMLDivElement | null>(null);
+  const compareRestoreRef = useRef<HTMLElement | null>(null);
   // Tracks whether the human edited the base field, so an arriving suggestion
   // never overwrites what they typed or deliberately cleared.
   const baseTouchedRef = useRef(false);
@@ -3395,6 +3472,19 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     ) : null;
   }
 
+  const onFileSheetKeyDown = useSheetFocus({
+    open: mobileFileListOpen,
+    containerRef: fileSheetRef,
+    restoreRef: fileTriggerRef,
+    onClose: () => setMobileFileListOpen(false),
+  });
+  const onCompareSheetKeyDown = useSheetFocus({
+    open: mobileCompareOpen,
+    containerRef: compareSheetRef,
+    restoreRef: compareRestoreRef,
+    onClose: () => setMobileCompareOpen(false),
+  });
+
   const renderComparePanel = () => (
     <div className="flex flex-wrap items-center gap-2">
       <select
@@ -4207,6 +4297,9 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             <button
               className="block w-full rounded px-2 py-2 text-left text-xs hover:bg-muted lg:hidden"
               onClick={() => {
+                // The menu itself closes, so remember its trigger for focus.
+                compareRestoreRef.current =
+                  reviewActionsRef.current?.querySelector("summary") ?? null;
                 setMobileCompareOpen(true);
                 if (reviewActionsRef.current)
                   reviewActionsRef.current.open = false;
@@ -4582,9 +4675,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                     </Button>
                     <button
                       type="button"
+                      ref={fileTriggerRef}
                       aria-label="Changed file"
                       aria-expanded={mobileFileListOpen}
-                      aria-haspopup="listbox"
+                      aria-haspopup="dialog"
                       className="flex h-8 min-w-0 flex-1 shrink cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2 text-[11px] lg:hidden"
                       onClick={(event) => {
                         // Search and filters live inside this sheet, so it must
@@ -5093,16 +5187,20 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                   onClick={() => setMobileFileListOpen(false)}
                 />
                 <div
-                  role="listbox"
+                  ref={fileSheetRef}
+                  role="dialog"
+                  aria-modal="true"
                   aria-label="Changed files"
-                  className="fixed z-50 flex max-h-[min(60dvh,26rem)] flex-col overflow-hidden rounded-lg border bg-popover shadow-lg lg:hidden"
+                  tabIndex={-1}
+                  onKeyDown={onFileSheetKeyDown}
+                  className="fixed z-50 flex max-h-[min(60dvh,26rem)] flex-col overflow-hidden rounded-lg border bg-popover shadow-lg focus:outline-none lg:hidden"
                   style={{
                     top: mobileFileListTop ?? 128,
                     left: "0.5rem",
                     right: "0.5rem",
                   }}
                 >
-                  <div className="shrink-0 border-b p-1.5">
+                  <div className="flex shrink-0 items-center gap-1.5 border-b p-1.5">
                     <FileFilterControls
                       compact
                       query={fileQuery}
@@ -5110,6 +5208,15 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                       mode={fileFilterMode}
                       onModeChange={setFileFilterMode}
                     />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS}
+                      aria-label="Close"
+                      onClick={() => setMobileFileListOpen(false)}
+                    >
+                      <Icon name="X" />
+                    </Button>
                   </div>
                   <div className="min-h-0 flex-1 overflow-auto p-1">
                     {visibleFiles.map((candidate) => {
@@ -5333,11 +5440,27 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             onClick={() => setMobileCompareOpen(false)}
           />
           <div
+            ref={compareSheetRef}
             role="dialog"
+            aria-modal="true"
             aria-label="Compare or refresh"
-            className="fixed left-2 right-2 z-50 max-h-[80dvh] overflow-auto rounded-xl border bg-popover p-3 shadow-2xl lg:hidden"
+            tabIndex={-1}
+            onKeyDown={onCompareSheetKeyDown}
+            className="fixed left-2 right-2 z-50 max-h-[80dvh] overflow-auto rounded-xl border bg-popover p-3 shadow-2xl focus:outline-none lg:hidden"
             style={{ top: mobileMenuTop ?? 96 }}
           >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="text-xs font-semibold">Compare or refresh</h3>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS}
+                aria-label="Close"
+                onClick={() => setMobileCompareOpen(false)}
+              >
+                <Icon name="X" />
+              </Button>
+            </div>
             {renderComparePanel()}
           </div>
         </>
