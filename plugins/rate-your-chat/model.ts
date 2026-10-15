@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const USE_CASES = [
   "coding",
+  "design",
   "debugging",
   "review",
   "research",
