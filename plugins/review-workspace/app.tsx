@@ -14,6 +14,7 @@ import {
   useRpc,
 } from "@get-bb/plugin-sdk/app";
 import * as Dialog from "@radix-ui/react-dialog";
+import { Drawer } from "vaul";
 import { FileDiff } from "@pierre/diffs/react";
 import {
   getSingularPatch,
@@ -132,6 +133,7 @@ type Review = {
   files: File[];
   annotations: Annotation[];
   viewedPaths: string[];
+  reviewedSectionIds: string[];
   summary: string | null;
   tour: ReviewTour | null;
 };
@@ -293,6 +295,8 @@ const PierreReviewDiff = memo(function PierreReviewDiff({
   loadDiffFiles,
   onSelect,
   keyboardSelection,
+  excerpt = false,
+  diffStyle = "unified",
 }: {
   fileDiff: FileDiffMetadata;
   lineAnnotations: DiffLineAnnotation<DiffAnnotation>[];
@@ -317,23 +321,29 @@ const PierreReviewDiff = memo(function PierreReviewDiff({
   };
   onSelect: (range: SelectedLineRange | null) => void;
   keyboardSelection: SelectedLineRange | null;
+  excerpt?: boolean;
+  diffStyle?: "unified" | "split";
 }) {
   const options = useMemo(
     () => ({
-      diffStyle: "unified" as const,
+      diffStyle: (diffStyle ?? "unified") as "unified" | "split",
       lineDiffType: "word-alt" as const,
       overflow: wrapLines ? ("wrap" as const) : ("scroll" as const),
       enableLineSelection: true,
       disableFileHeader: true,
       enableGutterUtility: true,
       lineHoverHighlight: "both" as const,
-      hunkSeparators: "line-info" as const,
+      // Tour excerpts are slices of a file, so the "N unmodified lines" label
+      // only describes the omitted rest of the file. Simple separators keep the
+      // excerpt focused on the anchored change.
+      hunkSeparators: (excerpt ? "simple" : "line-info") as
+        "simple" | "line-info",
       expandUnchanged: false,
       expansionLineCount: 50,
       loadDiffFiles,
       onLineSelectionEnd: onSelect,
     }),
-    [loadDiffFiles, onSelect, wrapLines],
+    [diffStyle, excerpt, loadDiffFiles, onSelect, wrapLines],
   );
   return (
     <FileDiff<DiffAnnotation>
@@ -534,6 +544,8 @@ const MountedDiff = memo(function MountedDiff({
   composer,
   onSelect,
   keyboardSelection,
+  excerpt = false,
+  diffStyle = "unified",
 }: {
   patch: string;
   lineAnnotations: DiffLineAnnotation<DiffAnnotation>[];
@@ -550,6 +562,8 @@ const MountedDiff = memo(function MountedDiff({
   composer: React.ComponentProps<typeof PierreReviewDiff>["composer"];
   onSelect: (range: SelectedLineRange | null) => void;
   keyboardSelection: SelectedLineRange | null;
+  excerpt?: boolean;
+  diffStyle?: "unified" | "split";
 }) {
   const parsed = useMemo(() => {
     if (!patch) return null;
@@ -583,6 +597,8 @@ const MountedDiff = memo(function MountedDiff({
       composer={composer}
       onSelect={onSelect}
       keyboardSelection={keyboardSelection}
+      excerpt={excerpt}
+      diffStyle={diffStyle}
     />
   );
 });
@@ -1769,6 +1785,43 @@ function ReviewPanel({ threadId }: { threadId: string }) {
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const feedbackOpenerRef = useRef<HTMLElement | null>(null);
   const mobileMoreRef = useRef<HTMLDetailsElement | null>(null);
+  const reviewActionsRef = useRef<HTMLDetailsElement | null>(null);
+  const [mobileFileListOpen, setMobileFileListOpen] = useState(false);
+  const [mobileCompareOpen, setMobileCompareOpen] = useState(false);
+  const [mobileMenuTop, setMobileMenuTop] = useState<number | null>(null);
+  const [mobileFileListTop, setMobileFileListTop] = useState<number | null>(
+    null,
+  );
+  const [reviewedSections, setReviewedSections] = useState<Set<string>>(
+    new Set(),
+  );
+  const [pendingSections, setPendingSections] = useState<Set<string>>(
+    new Set(),
+  );
+  const tourStepsRef = useRef<HTMLDetailsElement | null>(null);
+  // Tracks whether the human edited the base field, so an arriving suggestion
+  // never overwrites what they typed or deliberately cleared.
+  const baseTouchedRef = useRef(false);
+  // A tour-section request can outlive a revision switch, so rollback and error
+  // handling must know which revision it belonged to.
+  const currentReviewIdRef = useRef<string | null>(null);
+  currentReviewIdRef.current = review?.id ?? null;
+  // Bumped by every revision load, so a completion that outlives an A -> B -> A
+  // round trip is still recognised as stale.
+  const reviewGenerationRef = useRef(0);
+  const [diffLayout, setDiffLayout] = useState<"unified" | "split">("unified");
+  const [baseSuggestion, setBaseSuggestion] = useState<{
+    suggestedBase: string | null;
+    suggestionSource:
+      | "environment-merge-base"
+      | "environment-base"
+      | "upstream"
+      | "remote-default"
+      | "local-default"
+      | null;
+    branchName: string | null;
+    reason: string | null;
+  } | null>(null);
   const [mobilePanel, setMobilePanel] = useState<"compose" | null>(null);
   const [fileQuery, setFileQuery] = useState("");
   const [fileFilterMode, setFileFilterMode] = useState<FileFilterMode>("all");
@@ -1837,18 +1890,50 @@ function ReviewPanel({ threadId }: { threadId: string }) {
   const scrollSectionRef = useRef<HTMLElement>(null);
   const fileScrollFrameRef = useRef<number | null>(null);
 
+  const needsBase = targetKind === "branch" || targetKind === "all";
+  /**
+   * The value the next snapshot will use, so validation and target construction
+   * can never disagree (an enabled button used to be able to submit something
+   * else, such as a blank field falling back to "uncommitted"). The suggestion
+   * only ever fills the field; a deliberately cleared field disables the action
+   * instead of quietly submitting the suggestion.
+   */
+  function effectiveTargetValue(): string {
+    return targetKind === "uncommitted" ? "" : targetValue.trim();
+  }
+  function describeBaseSuggestion(): string | null {
+    const suggestion = baseSuggestion;
+    if (!suggestion) return null;
+    if (suggestion.suggestedBase) {
+      const from =
+        suggestion.suggestionSource === "environment-merge-base"
+          ? "this environment's merge base"
+          : suggestion.suggestionSource === "environment-base"
+            ? "the branch this environment was created from"
+            : suggestion.suggestionSource === "upstream"
+              ? `the upstream of ${suggestion.branchName ?? "this branch"}`
+              : suggestion.suggestionSource === "remote-default"
+                ? "the remote's default branch"
+                : "the repository's default branch";
+      if (targetValue.trim() && targetValue.trim() !== suggestion.suggestedBase)
+        return null;
+      return `From ${from}: ${suggestion.suggestedBase}.`;
+    }
+    return suggestion.reason ?? "No base branch could be detected here.";
+  }
   function buildRefreshTarget(): ReviewTarget | undefined {
-    if (targetKind === "commit" && targetValue.trim())
-      return { type: "commit", sha: targetValue.trim() };
-    if (targetKind === "branch" && targetValue.trim())
-      return { type: "branch_committed", mergeBaseBranch: targetValue.trim() };
-    if (targetKind === "all" && targetValue.trim())
-      return { type: "all", mergeBaseBranch: targetValue.trim() };
+    const value = effectiveTargetValue();
+    if (targetKind === "commit" && value) return { type: "commit", sha: value };
+    if (targetKind === "branch" && value)
+      return { type: "branch_committed", mergeBaseBranch: value };
+    if (targetKind === "all" && value)
+      return { type: "all", mergeBaseBranch: value };
     return undefined;
   }
 
   const load = useCallback(
     async (reviewId?: string) => {
+      reviewGenerationRef.current += 1;
       const [result, history] = await Promise.all([
         rpc.call("review", { threadId, ...(reviewId ? { reviewId } : {}) }),
         rpc.call("revisions", { threadId }),
@@ -1859,6 +1944,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
         setTargetKind(
           next.target.type === "branch_committed" ? "branch" : next.target.type,
         );
+        baseTouchedRef.current = false;
         setTargetValue(
           next.target.type === "commit"
             ? next.target.sha
@@ -1903,6 +1989,30 @@ function ReviewPanel({ threadId }: { threadId: string }) {
       ),
     );
   }, [load]);
+  // Suggested base branch for "vs base" targets, read from the thread's
+  // environment (host metadata plus the checkout's upstream). Advisory only:
+  // the value stays visible and editable, and never overrides a saved target.
+  useEffect(() => {
+    let cancelled = false;
+    rpc
+      .call("reviewEnvironment", { threadId })
+      .then((result) => {
+        if (cancelled) return;
+        setBaseSuggestion({
+          suggestedBase: result.suggestedBase,
+          suggestionSource: result.suggestionSource,
+          branchName: result.branchName,
+          reason: result.status === "unavailable" ? result.reason : null,
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBaseSuggestion(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [rpc, threadId]);
 
   const openThreadCounts = useMemo(
     () => unresolvedRootThreadCounts(review?.annotations ?? []),
@@ -1952,6 +2062,31 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     if (scopedFiles.some((candidate) => candidate.path === filePath)) return;
     setFilePath(scopedFiles[0]?.path ?? null);
   }, [filePath, scopedFiles]);
+  // Tour section progress is stored per revision and stays independent from the
+  // file-level viewed state.
+  useEffect(() => {
+    setReviewedSections(new Set(review?.reviewedSectionIds ?? []));
+    setPendingSections(new Set());
+  }, [review?.id, review?.reviewedSectionIds]);
+  // A suggestion can arrive after a base target was already selected.
+  useEffect(() => {
+    const suggested = baseSuggestion?.suggestedBase;
+    if (!suggested || baseTouchedRef.current) return;
+    if (targetKind !== "branch" && targetKind !== "all") return;
+    if (targetValue.trim()) return;
+    setTargetValue(suggested);
+  }, [baseSuggestion, targetKind, targetValue]);
+  // Mirrors Tailwind's lg breakpoint: below it the compose sheet replaces the
+  // inline composer and the desktop navigation rail is absent.
+  const [mobileViewport, setMobileViewport] = useState(false);
+  useEffect(() => {
+    const view = window.matchMedia?.("(max-width: 1023px)");
+    if (!view) return;
+    const update = () => setMobileViewport(view.matches);
+    update();
+    view.addEventListener("change", update);
+    return () => view.removeEventListener("change", update);
+  }, []);
   const file =
     review?.files.find((candidate) => candidate.path === filePath) ?? null;
   const patchCacheKey = review && file ? `${review.id}\\0${file.path}` : "";
@@ -2216,9 +2351,29 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     },
     [deferredPatches, review, rpc],
   );
+  const scrollToSurface = useCallback((surfaceKey: string, focus = false) => {
+    const container = scrollSectionRef.current;
+    const surface = surfaceRefs.current.get(surfaceKey);
+    if (container && surface) {
+      const stickyBar = container.querySelector<HTMLElement>(".sticky");
+      const containerTop = container.getBoundingClientRect().top;
+      const surfaceTop = surface.getBoundingClientRect().top;
+      const targetTop =
+        container.scrollTop +
+        surfaceTop -
+        containerTop -
+        (stickyBar?.offsetHeight ?? 0);
+      if (typeof container.scrollTo === "function")
+        container.scrollTo({ top: targetTop, behavior: "auto" });
+      else container.scrollTop = targetTop;
+    }
+    if (focus) surface?.focus({ preventScroll: true });
+  }, []);
   const chooseFile = useCallback(
     (path: string) => {
       setFilePath(path);
+      setMobileFileListOpen(false);
+      setMobileCompareOpen(false);
       if (!body.trim()) {
         setSelection(null);
         setSelectionPath(null);
@@ -2241,24 +2396,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
       if (body.trim() && selectionPath)
         setSelectionSurface(`file:${selectionPath}`);
       setActiveSurface(`file:${path}`);
-      requestAnimationFrame(() => {
-        const container = scrollSectionRef.current;
-        const surface = surfaceRefs.current.get(`file:${path}`);
-        if (container && surface) {
-          const stickyBar = container.querySelector<HTMLElement>(".sticky");
-          const containerTop = container.getBoundingClientRect().top;
-          const surfaceTop = surface.getBoundingClientRect().top;
-          const targetTop =
-            container.scrollTop +
-            surfaceTop -
-            containerTop -
-            (stickyBar?.offsetHeight ?? 0);
-          if (typeof container.scrollTo === "function")
-            container.scrollTo({ top: targetTop, behavior: "auto" });
-          else container.scrollTop = targetTop;
-        }
-        surface?.focus({ preventScroll: true });
-      });
+      requestAnimationFrame(() => scrollToSurface(`file:${path}`, true));
     },
     [body, selection, selectionPath],
   );
@@ -2279,7 +2417,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
       : (
           review?.tour?.steps.find((step) => step.id === activeTourStepId) ??
           review?.tour?.steps[0]
-        )?.anchors.some(
+        )?.anchors?.some(
           (anchor) =>
             anchor.valid &&
             anchor.filePath === fileCommentPath &&
@@ -3257,6 +3395,144 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     ) : null;
   }
 
+  const renderComparePanel = () => (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        aria-label="Review target"
+        value={targetKind}
+        onChange={(event) => {
+          const next = event.target.value as typeof targetKind;
+          setTargetKind(next);
+          // Prefill only when there is nothing to lose, and only for targets
+          // that need a base.
+          const suggested = baseSuggestion?.suggestedBase;
+          if (
+            (next === "branch" || next === "all") &&
+            !targetValue.trim() &&
+            suggested
+          ) {
+            baseTouchedRef.current = false;
+            setTargetValue(suggested);
+          }
+        }}
+        className="h-8 max-w-48 rounded-md border bg-background px-1 text-xs max-sm:w-44 sm:w-auto"
+      >
+        <option value="uncommitted">Uncommitted changes</option>
+        <option value="commit">Specific commit</option>
+        <option value="branch">Committed vs base</option>
+        <option value="all">Everything vs base</option>
+      </select>
+      {targetKind === "commit" ? (
+        recentCommits === null ? (
+          <span className="text-[11px] text-muted-foreground">
+            Loading commits...
+          </span>
+        ) : recentCommits.status === "ok" && recentCommits.commits.length ? (
+          <select
+            aria-label="Recent commits"
+            value={
+              recentCommits.commits.some((commit) => commit.sha === targetValue)
+                ? targetValue
+                : ""
+            }
+            onChange={(event) => setTargetValue(event.target.value)}
+            className="h-8 min-w-0 max-w-64 flex-1 basis-44 rounded-md border bg-background px-1 text-xs max-sm:basis-24"
+          >
+            <option value="">Pick a commit...</option>
+            {recentCommits.commits.map((commit) => (
+              <option
+                key={commit.sha}
+                value={commit.sha}
+                title={`${commit.author} · ${commit.date}`}
+              >
+                {`${commit.short} · ${commit.subject.slice(0, 60)} (${commit.date})`}
+              </option>
+            ))}
+          </select>
+        ) : null
+      ) : null}
+      {targetKind !== "uncommitted" ? (
+        <input
+          value={targetValue}
+          onChange={(event) => {
+            baseTouchedRef.current = true;
+            setTargetValue(event.target.value);
+          }}
+          placeholder={
+            targetKind === "commit"
+              ? "paste commit sha"
+              : (baseSuggestion?.suggestedBase ?? "base branch")
+          }
+          aria-label={targetKind === "commit" ? "Commit sha" : "Base branch"}
+          className="h-8 w-44 rounded-md border bg-background px-2 font-mono text-xs max-sm:min-w-0 max-sm:w-auto max-sm:flex-1 max-sm:basis-24"
+        />
+      ) : null}
+      <Button
+        size="sm"
+        onClick={() => void refresh({ target: buildRefreshTarget() })}
+        disabled={
+          busy || (targetKind !== "uncommitted" && !effectiveTargetValue())
+        }
+      >
+        {busy
+          ? "Working..."
+          : targetKind === "commit"
+            ? "Review commit"
+            : targetKind === "branch"
+              ? "Review committed"
+              : targetKind === "all"
+                ? "Review everything"
+                : review
+                  ? "Refresh"
+                  : "Open review"}
+      </Button>
+      {baseSuggestion?.suggestedBase ? (
+        <div className="flex w-full flex-wrap items-center gap-2 border-t pt-2">
+          <span className="text-[11px] text-muted-foreground">
+            Compare with
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[11px]"
+            disabled={busy}
+            onClick={() =>
+              void refresh({
+                target: {
+                  type: "branch_committed",
+                  mergeBaseBranch: baseSuggestion.suggestedBase!,
+                },
+              })
+            }
+          >
+            Committed vs {baseSuggestion.suggestedBase}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-[11px]"
+            disabled={busy}
+            onClick={() =>
+              void refresh({
+                target: {
+                  type: "all",
+                  mergeBaseBranch: baseSuggestion.suggestedBase!,
+                },
+              })
+            }
+          >
+            Everything vs {baseSuggestion.suggestedBase}
+          </Button>
+        </div>
+      ) : null}
+      {needsBase && describeBaseSuggestion() ? (
+        <p className="w-full text-[11px] text-muted-foreground">
+          {describeBaseSuggestion()}
+        </p>
+      ) : null}
+    </div>
+  );
+
   function renderFile(
     candidate: File,
     anchor?: ReviewTourAnchor,
@@ -3298,10 +3574,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
         onKeyDown={(event) =>
           handleDiffKeyDown(event, candidate, patch, surfaceKey)
         }
-        className="mb-6 scroll-mt-16 rounded-lg border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className={`mb-6 scroll-mt-16 rounded-lg border bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
       >
-        <div className="flex flex-wrap items-center gap-2 border-b bg-card px-3 py-2">
-          <div className="flex min-w-0 flex-1 items-center gap-2 max-sm:basis-full">
+        <div className="flex items-center gap-1.5 border-b bg-card px-2 py-1.5 sm:gap-2 sm:px-3 sm:py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2">
             {!anchor ? (
               <Button
                 size="sm"
@@ -3320,24 +3596,32 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                 {collapsed ? "▸" : "▾"}
               </Button>
             ) : null}
-            <h3 className="min-w-0 flex-1 break-all font-mono text-xs font-semibold">
+            <h3
+              className="min-w-0 flex-1 truncate font-mono text-xs font-semibold"
+              title={candidate.path}
+            >
               {candidate.path}
               {anchor
                 ? ` · ${anchor.side}:${anchor.startLine}-${anchor.endLine}`
                 : ""}
             </h3>
           </div>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => openFileComment(candidate.path, surfaceKey)}
-          >
-            Comment on file
-          </Button>
-          {anchor ? (
+          {anchor ? null : (
             <Button
               size="sm"
               variant="outline"
+              className="max-lg:px-2"
+              aria-label="Comment on file"
+              onClick={() => openFileComment(candidate.path, surfaceKey)}
+            >
+              <Icon name="MessageSquare" className="lg:hidden" />
+              <span className="max-lg:hidden">Comment on file</span>
+            </Button>
+          )}
+          {anchor ? (
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => {
                 setFileQuery("");
                 setFileFilterMode("all");
@@ -3353,6 +3637,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
               variant={
                 viewedPaths.has(candidate.path) ? "secondary" : "outline"
               }
+              className="max-lg:px-2"
+              aria-label={
+                viewedPaths.has(candidate.path) ? "Viewed ✓" : "Mark viewed"
+              }
               aria-pressed={viewedPaths.has(candidate.path)}
               onClick={() => {
                 if (viewedPaths.has(candidate.path)) {
@@ -3367,7 +3655,13 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                 }
               }}
             >
-              {viewedPaths.has(candidate.path) ? "Viewed ✓" : "Mark viewed"}
+              <Icon
+                name={viewedPaths.has(candidate.path) ? "Check" : "Eye"}
+                className="lg:hidden"
+              />
+              <span className="max-lg:hidden">
+                {viewedPaths.has(candidate.path) ? "Viewed ✓" : "Mark viewed"}
+              </span>
             </Button>
           )}
         </div>
@@ -3426,6 +3720,8 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                   </p>
                 ) : null}
                 <MountedDiff
+                  excerpt={Boolean(anchor)}
+                  diffStyle={diffLayout}
                   patch={patch}
                   lineAnnotations={inlineAnnotations}
                   annotations={review.annotations}
@@ -3488,6 +3784,101 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     const step =
       tour.steps.find((candidate) => candidate.id === activeTourStepId) ??
       tour.steps[0];
+    const stepIndex = step ? tour.steps.indexOf(step) : -1;
+    const reviewedCount = tour.steps.filter((candidate) =>
+      reviewedSections.has(candidate.id),
+    ).length;
+    const stepReviewed = Boolean(step && reviewedSections.has(step.id));
+    // Files this section actually shows an excerpt for, in reading order.
+    const sectionFiles = (() => {
+      if (!step) return [];
+      const files = new Map<
+        string,
+        {
+          path: string;
+          additions: number;
+          deletions: number;
+          surfaceKey: string;
+        }
+      >();
+      step.blocks.forEach((block, index) => {
+        if (block.kind !== "diff") return;
+        const anchor = block.anchor;
+        if (!anchor.valid) return;
+        if (tourScopePaths && !tourScopePaths.has(anchor.filePath)) return;
+        const candidate = review?.files.find(
+          (file) => file.path === anchor.filePath,
+        );
+        if (!candidate || files.has(candidate.path)) return;
+        files.set(candidate.path, {
+          path: candidate.path,
+          additions: candidate.additions,
+          deletions: candidate.deletions,
+          surfaceKey: `tour:${step.id}:${index}`,
+        });
+      });
+      return [...files.values()];
+    })();
+    const toggleStepReviewed = (stepId: string, reviewed: boolean) => {
+      const originReviewId = review.id;
+      const originGeneration = reviewGenerationRef.current;
+      const stillOnOrigin = () =>
+        currentReviewIdRef.current === originReviewId &&
+        reviewGenerationRef.current === originGeneration;
+      setPendingSections((current) => new Set(current).add(stepId));
+      setReviewedSections((current) => {
+        const next = new Set(current);
+        if (reviewed) next.add(stepId);
+        else next.delete(stepId);
+        return next;
+      });
+      void rpc
+        .call("setTourSectionReviewed", {
+          reviewId: review.id,
+          stepId,
+          reviewed,
+        })
+        .catch((cause) => {
+          // A late failure from a previous revision must not mark or unmark the
+          // revision now on screen; drop it instead.
+          if (!stillOnOrigin()) return;
+          // Revert only this section: a whole-set rollback could undo another
+          // section's successful toggle.
+          setReviewedSections((current) => {
+            const next = new Set(current);
+            if (reviewed) next.delete(stepId);
+            else next.add(stepId);
+            return next;
+          });
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not save tour progress.",
+          );
+        })
+        .finally(() => {
+          if (!stillOnOrigin()) return;
+          setPendingSections((current) => {
+            const next = new Set(current);
+            next.delete(stepId);
+            return next;
+          });
+        });
+    };
+    const gotoTourStep = (index: number) => {
+      const nextStep = tour.steps[index];
+      if (!nextStep) return;
+      setActiveTourStepId(nextStep.id);
+      setActiveSurface(null);
+      setKeyboardRangeStart(null);
+      setKeyboardRangeValue(null);
+      scrollSectionRef.current?.scrollTo?.({ top: 0 });
+      // The picker covers the section it just opened.
+      if (tourStepsRef.current) {
+        tourStepsRef.current.open = false;
+        tourStepsRef.current.querySelector("summary")?.focus();
+      }
+    };
     return (
       <div className="mx-auto max-w-5xl">
         <h2 className="text-lg font-semibold">{tour.title}</h2>
@@ -3497,11 +3888,108 @@ function ReviewPanel({ threadId }: { threadId: string }) {
           </p>
         ) : null}
         <p className="my-3 text-[11px] text-muted-foreground">
-          Agent-authored explanation, not runtime-verified. Tour reading does
-          not mark files viewed.
+          Agent-authored, not runtime-verified · reading does not mark files
+          viewed.
         </p>
         {step ? (
           <article aria-label={step.title}>
+            {tour.steps.length > 1 ? (
+              <div className="mb-4 flex items-center gap-1 rounded-lg border bg-card p-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label="Previous tour section"
+                  disabled={stepIndex <= 0}
+                  onClick={() => gotoTourStep(stepIndex - 1)}
+                >
+                  ‹
+                </Button>
+                <details ref={tourStepsRef} className="relative min-w-0 flex-1">
+                  <summary
+                    aria-label="Tour section progress"
+                    className="flex min-w-0 cursor-pointer list-none items-center justify-center gap-1 rounded px-2 py-1 text-center text-xs font-medium hover:bg-muted"
+                  >
+                    <span
+                      className="min-w-0 truncate"
+                      title={`${stepIndex + 1}. ${step.title}`}
+                    >
+                      Section {stepIndex + 1} of {tour.steps.length} ·{" "}
+                      {step.title}
+                    </span>
+                    <span aria-hidden="true" className="text-muted-foreground">
+                      ˅
+                    </span>
+                  </summary>
+                  <div className="absolute top-full left-0 right-0 z-30 mt-1 max-h-[min(50dvh,20rem)] overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-lg">
+                    {tour.steps.map((candidate, candidateIndex) => (
+                      <button
+                        key={candidate.id}
+                        aria-current={
+                          candidate.id === step.id ? "true" : undefined
+                        }
+                        className={`w-full rounded px-2 py-1.5 text-left text-xs ${candidate.id === step.id ? "bg-primary/10" : "hover:bg-muted"}`}
+                        onClick={() => gotoTourStep(candidateIndex)}
+                      >
+                        {candidateIndex + 1}. {candidate.title}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label="Next tour section"
+                  disabled={stepIndex >= tour.steps.length - 1}
+                  onClick={() => gotoTourStep(stepIndex + 1)}
+                >
+                  ›
+                </Button>
+              </div>
+            ) : null}
+            <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              {sectionFiles.length ? (
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  {sectionFiles.map((file) => (
+                    <button
+                      key={file.path}
+                      type="button"
+                      aria-label={`Show ${file.path} in this section`}
+                      title={file.path}
+                      className="flex max-w-[14rem] items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-[11px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => scrollToSurface(file.surfaceKey)}
+                    >
+                      <span className="truncate font-mono">
+                        {file.path.split("/").pop()}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-emerald-700 dark:text-emerald-400">
+                        +{file.additions}
+                      </span>
+                      <span className="shrink-0 tabular-nums text-red-700 dark:text-red-400">
+                        -{file.deletions}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <span className="text-[11px] text-muted-foreground">
+                  {reviewedCount} of {tour.steps.length} sections reviewed
+                </span>
+                <Button
+                  size="sm"
+                  variant={stepReviewed ? "secondary" : "outline"}
+                  aria-pressed={stepReviewed}
+                  aria-label={
+                    stepReviewed ? "Section reviewed" : "Mark section reviewed"
+                  }
+                  disabled={pendingSections.has(step.id)}
+                  onClick={() => toggleStepReviewed(step.id, !stepReviewed)}
+                >
+                  <Icon name={stepReviewed ? "Check" : "Circle"} />
+                  <span className="max-sm:hidden">Reviewed</span>
+                </Button>
+              </div>
+            </div>
             <h3 className="mb-4 text-base font-semibold">{step.title}</h3>
             {step.blocks.map((block, index) => {
               if (block.kind === "narrative")
@@ -3551,33 +4039,40 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             })}
           </article>
         ) : null}
-        <details className="mt-4 rounded border p-3 text-xs">
-          <summary className="cursor-pointer font-semibold">
-            Outside the tour / raw-change coverage
-          </summary>
-          <p className="mt-2">
-            {tour.coverage.coveredChangedLines} of{" "}
-            {tour.coverage.totalChangedLines} added/deleted lines have tour
-            anchors. {tour.coverage.uncovered.length} remain unanchored. This is
-            not a reading or correctness verdict.
-          </p>
-          {[
-            ...new Set(tour.coverage.uncovered.map((line) => line.filePath)),
-          ].map((path) => (
-            <button
-              key={path}
-              className="mt-2 block break-all text-left font-mono underline"
-              onClick={() => {
-                setReviewScope("all");
-                setFileQuery("");
-                setFileFilterMode("all");
-                chooseFile(path);
-              }}
-            >
-              {path} →
-            </button>
-          ))}
-        </details>
+        {tour.coverage.totalChangedLines > 0 ? (
+          <div className="mt-4 text-[11px] text-muted-foreground">
+            {tour.coverage.coveredChangedLines ===
+            tour.coverage.totalChangedLines
+              ? `${tour.coverage.coveredChangedLines} of ${tour.coverage.totalChangedLines} changed lines are anchored to tour excerpts.`
+              : `${tour.coverage.coveredChangedLines} of ${tour.coverage.totalChangedLines} changed lines are anchored to tour excerpts; coverage is not a reading or correctness verdict.`}
+            {[...new Set(tour.coverage.uncovered.map((line) => line.filePath))]
+              .length ? (
+              <details className="mt-2 rounded border p-2">
+                <summary className="cursor-pointer">
+                  Raw changes outside the tour →
+                </summary>
+                {[
+                  ...new Set(
+                    tour.coverage.uncovered.map((line) => line.filePath),
+                  ),
+                ].map((path) => (
+                  <button
+                    key={path}
+                    className="mt-2 block break-all text-left font-mono underline"
+                    onClick={() => {
+                      setReviewScope("all");
+                      setFileQuery("");
+                      setFileFilterMode("all");
+                      chooseFile(path);
+                    }}
+                  >
+                    {path} →
+                  </button>
+                ))}
+              </details>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     );
   }
@@ -3630,14 +4125,62 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             Carry open comments forward
           </Button>
         ) : null}
-        <details className="relative">
+        <details ref={reviewActionsRef} className="relative">
           <summary
             className="flex h-8 cursor-pointer list-none items-center rounded-md border px-2 text-xs hover:bg-muted"
             aria-label="Review actions"
+            onClick={(event) => {
+              setMobileMenuTop(
+                event.currentTarget.getBoundingClientRect().bottom + 4,
+              );
+            }}
           >
             •••
           </summary>
-          <div className="absolute top-10 right-0 z-30 w-56 max-lg:left-0 max-lg:right-auto rounded-md border bg-popover p-2 text-popover-foreground shadow-lg">
+          <button
+            type="button"
+            aria-hidden="true"
+            tabIndex={-1}
+            className="fixed inset-0 z-20 cursor-default lg:hidden"
+            onClick={() => {
+              if (reviewActionsRef.current)
+                reviewActionsRef.current.open = false;
+            }}
+          />
+          <div
+            className="absolute top-10 right-0 z-30 max-h-[min(70dvh,30rem)] w-60 overflow-auto rounded-md border bg-popover p-2 text-popover-foreground shadow-lg max-lg:fixed max-lg:inset-x-2 max-lg:top-auto max-lg:z-50 max-lg:w-auto"
+            style={mobileViewport ? { top: mobileMenuTop ?? 96 } : undefined}
+          >
+            <div className="lg:hidden">
+              <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Revisions
+              </p>
+              {revisions.length ? (
+                revisions.map((revision) => (
+                  <button
+                    key={revision.id}
+                    aria-current={
+                      revision.id === review?.id ? "true" : undefined
+                    }
+                    className={`block w-full rounded px-2 py-2 text-left text-xs ${revision.id === review?.id ? "bg-muted" : "hover:bg-muted"}`}
+                    onClick={() => {
+                      void load(revision.id);
+                      if (reviewActionsRef.current)
+                        reviewActionsRef.current.open = false;
+                    }}
+                  >
+                    {new Date(revision.createdAt).toLocaleString()} ·{" "}
+                    {describeTarget(revision.target)} ·{" "}
+                    {revision.unresolvedCount} open
+                  </button>
+                ))
+              ) : (
+                <p className="px-2 py-1 text-[11px] text-muted-foreground">
+                  No saved revisions.
+                </p>
+              )}
+              <div className="my-1 border-t" />
+            </div>
             {review && revisions[0] && review.id !== revisions[0].id ? (
               <button
                 className="block w-full rounded px-2 py-2 text-left text-xs hover:bg-muted xl:hidden"
@@ -3653,100 +4196,42 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             >
               Delete older review revisions
             </button>
+            <div className="my-1 border-t lg:hidden" />
+            <button
+              className="block w-full rounded px-2 py-2 text-left text-xs hover:bg-muted lg:hidden"
+              onClick={() => setFullscreen((current) => !current)}
+              aria-pressed={fullscreen}
+            >
+              {fullscreen ? "Exit full screen" : "Full screen"}
+            </button>
+            <button
+              className="block w-full rounded px-2 py-2 text-left text-xs hover:bg-muted lg:hidden"
+              onClick={() => {
+                setMobileCompareOpen(true);
+                if (reviewActionsRef.current)
+                  reviewActionsRef.current.open = false;
+              }}
+            >
+              {review ? "Change review target…" : "Open a review…"}
+            </button>
           </div>
         </details>
         <Button
           size="sm"
           variant="ghost"
-          className={COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS}
+          className={`${COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS} max-lg:hidden`}
           onClick={() => setFullscreen((current) => !current)}
           aria-pressed={fullscreen}
           aria-label={fullscreen ? "Exit full screen" : "Full screen"}
         >
           <Icon name={fullscreen ? "Minimize2" : "Maximize2"} />
         </Button>
-        <details className="relative" open={!review}>
+        <details className="relative max-lg:hidden">
           <summary className="flex h-8 cursor-pointer list-none items-center rounded-md border px-2 text-xs hover:bg-muted">
             Compare / refresh
           </summary>
-          <div className="absolute right-0 top-full z-30 mt-2 flex w-[min(28rem,calc(100vw-2rem))] flex-wrap items-center gap-2 rounded-lg border bg-popover p-3 shadow-lg">
-            <select
-              aria-label="Review target"
-              value={targetKind}
-              onChange={(event) =>
-                setTargetKind(event.target.value as typeof targetKind)
-              }
-              className="h-8 max-w-48 rounded-md border bg-background px-1 text-xs max-sm:w-44 sm:w-auto"
-            >
-              <option value="uncommitted">Uncommitted changes</option>
-              <option value="commit">Specific commit</option>
-              <option value="branch">Committed vs base</option>
-              <option value="all">Everything vs base</option>
-            </select>
-            {targetKind === "commit" ? (
-              recentCommits === null ? (
-                <span className="text-[11px] text-muted-foreground">
-                  Loading commits...
-                </span>
-              ) : recentCommits.status === "ok" &&
-                recentCommits.commits.length ? (
-                <select
-                  aria-label="Recent commits"
-                  value={
-                    recentCommits.commits.some(
-                      (commit) => commit.sha === targetValue,
-                    )
-                      ? targetValue
-                      : ""
-                  }
-                  onChange={(event) => setTargetValue(event.target.value)}
-                  className="h-8 min-w-0 max-w-64 flex-1 basis-44 rounded-md border bg-background px-1 text-xs max-sm:basis-24"
-                >
-                  <option value="">Pick a commit...</option>
-                  {recentCommits.commits.map((commit) => (
-                    <option
-                      key={commit.sha}
-                      value={commit.sha}
-                      title={`${commit.author} · ${commit.date}`}
-                    >
-                      {`${commit.short} · ${commit.subject.slice(0, 60)} (${commit.date})`}
-                    </option>
-                  ))}
-                </select>
-              ) : null
-            ) : null}
-            {targetKind !== "uncommitted" ? (
-              <input
-                value={targetValue}
-                onChange={(event) => setTargetValue(event.target.value)}
-                placeholder={
-                  targetKind === "commit" ? "paste commit sha" : "base branch"
-                }
-                aria-label={
-                  targetKind === "commit" ? "Commit sha" : "Base branch"
-                }
-                className="h-8 w-44 rounded-md border bg-background px-2 font-mono text-xs max-sm:min-w-0 max-sm:w-auto max-sm:flex-1 max-sm:basis-24"
-              />
-            ) : null}
-            <Button
-              size="sm"
-              onClick={() => void refresh({ target: buildRefreshTarget() })}
-              disabled={
-                busy || (targetKind !== "uncommitted" && !targetValue.trim())
-              }
-            >
-              {busy
-                ? "Working..."
-                : targetKind === "commit"
-                  ? "Review commit"
-                  : targetKind === "branch"
-                    ? "Review committed"
-                    : targetKind === "all"
-                      ? "Review everything"
-                      : review
-                        ? "Refresh"
-                        : "Open review"}
-            </Button>
+          <div className="absolute right-0 top-full z-30 mt-2 w-[min(28rem,calc(100vw-2rem))] rounded-lg border bg-popover p-3 shadow-lg">
+            {renderComparePanel()}
           </div>
         </details>
       </header>
@@ -3769,8 +4254,18 @@ function ReviewPanel({ threadId }: { threadId: string }) {
         </p>
       ) : null}
       {!review ? (
-        <div className="p-6 text-sm text-muted-foreground">
-          Open a review to load changes from this thread&apos;s environment.
+        <div className="mx-auto w-full max-w-2xl p-4 sm:p-6">
+          <div className="rounded-xl border bg-card p-4 sm:p-5">
+            <h2 className="text-sm font-semibold">
+              No review yet for this thread
+            </h2>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Pick what to compare, then open the review. Uncommitted changes
+              are the default; a commit or base branch reviews code that is
+              already committed. Nothing is saved until the snapshot opens.
+            </p>
+            <div className="mt-4">{renderComparePanel()}</div>
+          </div>
         </div>
       ) : (
         <>
@@ -3809,6 +4304,36 @@ function ReviewPanel({ threadId }: { threadId: string }) {
               <Button
                 size="sm"
                 variant="ghost"
+                className={`${COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS} text-muted-foreground`}
+                onClick={() => setWrapLines((current) => !current)}
+                aria-pressed={wrapLines}
+                aria-label={
+                  wrapLines ? "Disable diff line wrap" : "Wrap diff lines"
+                }
+              >
+                <Icon name="TextWrap" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`${COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS} text-muted-foreground`}
+                onClick={() =>
+                  setDiffLayout((current) =>
+                    current === "split" ? "unified" : "split",
+                  )
+                }
+                aria-pressed={diffLayout === "split"}
+                aria-label={
+                  diffLayout === "split"
+                    ? "Use unified diff view"
+                    : "Use split diff view"
+                }
+              >
+                <Icon name="Columns2" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
                 className="hidden sm:inline-flex"
                 aria-expanded={keyboardHelpOpen}
                 onClick={() => setKeyboardHelpOpen((open) => !open)}
@@ -3819,6 +4344,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                 <Button
                   size="sm"
                   variant="outline"
+                  className="max-lg:hidden"
                   aria-label={`Review feedback, ${pendingCount} pending/unsent comments`}
                   onClick={(event) => {
                     feedbackOpenerRef.current = event.currentTarget;
@@ -3832,83 +4358,6 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                   ) : null}
                 </Button>
               </Dialog.Trigger>
-            </div>
-            <div className="shrink-0 border-b bg-muted/40 p-1 lg:hidden">
-              <div className="flex min-w-0 items-center gap-1.5">
-                <select
-                  aria-label="Review revision"
-                  value={review.id}
-                  onChange={(event) => void load(event.target.value)}
-                  className="min-w-0 flex-1 rounded-md border bg-background px-2 py-2 text-xs"
-                >
-                  {revisions.map((revision) => (
-                    <option key={revision.id} value={revision.id}>
-                      {new Date(revision.createdAt).toLocaleString()} ·{" "}
-                      {describeTarget(revision.target)} ·{" "}
-                      {revision.unresolvedCount} open
-                    </option>
-                  ))}
-                </select>
-                {readingMode === "tour" ? (
-                  <select
-                    aria-label="Tour section"
-                    value={activeTourStepId ?? review.tour?.steps[0]?.id ?? ""}
-                    onChange={(event) => {
-                      setActiveTourStepId(event.target.value);
-                      setActiveSurface(null);
-                      setKeyboardRangeStart(null);
-                      setKeyboardRangeValue(null);
-                      scrollSectionRef.current?.scrollTo?.({ top: 0 });
-                    }}
-                    className="min-w-0 flex-[1.5] rounded-md border bg-background px-2 py-2 text-xs"
-                  >
-                    {review.tour?.steps.map((step) => (
-                      <option key={step.id} value={step.id}>
-                        {step.title}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <select
-                    aria-label="Changed file"
-                    value={filePath ?? ""}
-                    disabled={!visibleFiles.length}
-                    onChange={(event) => chooseFile(event.target.value)}
-                    className="min-w-0 flex-[1.5] rounded-md border bg-background px-2 py-2 text-xs"
-                  >
-                    {visibleFiles.length ? null : (
-                      <option value="" disabled>
-                        No matching files
-                      </option>
-                    )}
-                    {visibleFiles.map((candidate, index) => (
-                      <option key={candidate.path} value={candidate.path}>
-                        {index + 1}/{visibleFiles.length} · {candidate.path}
-                        {openThreadCounts.has(candidate.path)
-                          ? ` · ${openThreadCounts.get(candidate.path)} open`
-                          : ""}
-                      </option>
-                    ))}
-                  </select>
-                )}
-                <details className="relative shrink-0">
-                  <summary
-                    aria-label="File filters"
-                    className="flex h-9 cursor-pointer list-none items-center rounded-md border bg-background px-2 text-xs"
-                  >
-                    Filters
-                  </summary>
-                  <div className="absolute right-0 z-30 mt-1 w-[min(22rem,calc(100vw-1rem))] rounded-md border bg-popover p-2 shadow-lg">
-                    <FileFilterControls
-                      compact
-                      query={fileQuery}
-                      onQuery={setFileQuery}
-                      mode={fileFilterMode}
-                      onModeChange={setFileFilterMode}
-                    />
-                  </div>
-                </details>
-              </div>
             </div>
             <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[15rem_minmax(0,1fr)]">
               <aside className="hidden min-h-0 overflow-auto border-r bg-muted/30 lg:block">
@@ -4062,7 +4511,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
               </aside>
               <section
                 ref={scrollSectionRef}
-                onScroll={(event) => {
+                onScroll={() => {
                   if (readingMode !== "files") return;
                   if (fileScrollFrameRef.current !== null)
                     cancelAnimationFrame(fileScrollFrameRef.current);
@@ -4131,12 +4580,70 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                     >
                       ›
                     </Button>
+                    <button
+                      type="button"
+                      aria-label="Changed file"
+                      aria-expanded={mobileFileListOpen}
+                      aria-haspopup="listbox"
+                      className="flex h-8 min-w-0 flex-1 shrink cursor-pointer items-center gap-1.5 rounded-md border bg-background px-2 text-[11px] lg:hidden"
+                      onClick={(event) => {
+                        // Search and filters live inside this sheet, so it must
+                        // open even when nothing matches: otherwise an empty
+                        // result is a dead end on phones.
+                        const rect =
+                          event.currentTarget.getBoundingClientRect();
+                        setMobileFileListTop(rect.bottom + 4);
+                        setMobileFileListOpen((open) => !open);
+                      }}
+                    >
+                      <span className="shrink-0 tabular-nums text-muted-foreground">
+                        {visibleFiles.length
+                          ? `${
+                              Math.max(
+                                visibleFiles.findIndex(
+                                  (candidate) => candidate.path === filePath,
+                                ),
+                                0,
+                              ) + 1
+                            }/${visibleFiles.length}`
+                          : "0/0"}
+                      </span>
+                      <span
+                        className="min-w-0 flex-1 truncate text-left"
+                        title={file?.path ?? undefined}
+                      >
+                        {visibleFiles.length
+                          ? visibleFiles.some(
+                              (candidate) => candidate.path === filePath,
+                            )
+                            ? (file?.path ?? "").split("/").pop()
+                            : "Choose file"
+                          : "No matching files"}
+                      </span>
+                      {filePath && viewedPaths.has(filePath) ? (
+                        <span
+                          aria-label="Viewed"
+                          className="shrink-0 text-primary"
+                        >
+                          ✓
+                        </span>
+                      ) : null}
+                      {filePath && openThreadCounts.get(filePath) ? (
+                        <span
+                          aria-label={`${openThreadCounts.get(filePath)} open comment threads`}
+                          className="shrink-0 rounded-full bg-primary/10 px-1.5 text-[10px] font-semibold text-primary"
+                        >
+                          {openThreadCounts.get(filePath)}
+                        </span>
+                      ) : null}
+                    </button>
                     <span
-                      className="min-w-0 flex-1 truncate px-1 font-mono text-xs font-semibold"
+                      className="hidden min-w-0 flex-1 truncate px-1 font-mono text-xs font-semibold lg:block"
                       title={file?.path}
                     >
                       {file?.path ?? "No changed files"}
                     </span>
+
                     <details ref={mobileMoreRef} className="shrink-0 lg:hidden">
                       <summary
                         aria-label="More diff controls"
@@ -4237,18 +4744,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                             ) : null}
                           </div>
                         </details>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="mt-1 w-full justify-start"
-                          onClick={() => setWrapLines((current) => !current)}
-                          aria-pressed={wrapLines}
-                        >
-                          <Icon name="TextWrap" />
-                          {wrapLines
-                            ? "Disable line wrapping"
-                            : "Wrap diff lines"}
-                        </Button>
+
                         <button
                           type="button"
                           aria-controls="mobile-keyboard-shortcuts"
@@ -4273,7 +4769,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                       </div>
                     </details>
                     <Button
-                      className="lg:hidden max-sm:px-2 max-sm:text-[11px]"
+                      className="shrink-0 whitespace-nowrap lg:hidden max-sm:px-2 max-sm:text-[11px]"
                       size="sm"
                       variant={isViewed ? "secondary" : "default"}
                       onClick={() =>
@@ -4387,24 +4883,34 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                         ) : null}
                       </div>
                     </details>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className={`hidden lg:inline-flex ${COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS} text-muted-foreground`}
-                      onClick={() => setWrapLines((current) => !current)}
-                      aria-pressed={wrapLines}
-                      aria-label={
-                        wrapLines ? "Disable diff line wrap" : "Wrap diff lines"
-                      }
-                    >
-                      <Icon name="TextWrap" />
-                    </Button>
                   </div>
                 </div>
                 <div className="p-1.5 sm:p-2 lg:p-4">
                   {keyboardHelpOpen ? (
                     <div className="mb-3 rounded border bg-background px-3 py-2 text-[11px] text-muted-foreground">
                       {keyboardShortcutContent}
+                    </div>
+                  ) : null}
+                  {mobileViewport &&
+                  selection &&
+                  body.trim() &&
+                  mobilePanel === null ? (
+                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+                      <span>
+                        Unsent draft remains anchored to{" "}
+                        <code>{selectionPath}</code>
+                        {selection
+                          ? ` (${selection.side === "new" ? "new" : "old"}: ${selection.endLine === selection.startLine ? selection.startLine : `${selection.startLine}-${selection.endLine}`})`
+                          : ""}
+                        .
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setMobilePanel("compose")}
+                      >
+                        Resume draft
+                      </Button>
                     </div>
                   ) : null}
                   {draftNotice ? (
@@ -4577,6 +5083,113 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                 />
               </Dialog.Content>
             </Dialog.Portal>
+            {mobileFileListOpen ? (
+              <>
+                <button
+                  type="button"
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  className="fixed inset-0 z-40 cursor-default lg:hidden"
+                  onClick={() => setMobileFileListOpen(false)}
+                />
+                <div
+                  role="listbox"
+                  aria-label="Changed files"
+                  className="fixed z-50 flex max-h-[min(60dvh,26rem)] flex-col overflow-hidden rounded-lg border bg-popover shadow-lg lg:hidden"
+                  style={{
+                    top: mobileFileListTop ?? 128,
+                    left: "0.5rem",
+                    right: "0.5rem",
+                  }}
+                >
+                  <div className="shrink-0 border-b p-1.5">
+                    <FileFilterControls
+                      compact
+                      query={fileQuery}
+                      onQuery={setFileQuery}
+                      mode={fileFilterMode}
+                      onModeChange={setFileFilterMode}
+                    />
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-auto p-1">
+                    {visibleFiles.map((candidate) => {
+                      const kind = normalizeChangeKind(candidate.status);
+                      return (
+                        <button
+                          key={candidate.path}
+                          aria-current={
+                            candidate.path === filePath ? "true" : undefined
+                          }
+                          aria-label={`Open ${candidate.path}`}
+                          className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => {
+                            chooseFile(candidate.path);
+                            setMobileFileListOpen(false);
+                          }}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className={`shrink-0 rounded px-1 py-0.5 text-[10px] font-semibold ${
+                              kind === "added"
+                                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                : kind === "deleted"
+                                  ? "bg-red-500/15 text-red-700 dark:text-red-400"
+                                  : "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                            }`}
+                          >
+                            {candidate.status[0]?.toUpperCase()}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span
+                              className="block truncate"
+                              title={candidate.path}
+                            >
+                              {candidate.path.split("/").pop()}
+                              <span className="block truncate text-[10px] font-normal text-muted-foreground">
+                                {candidate.path.slice(
+                                  0,
+                                  candidate.path.lastIndexOf("/"),
+                                )}
+                              </span>
+                            </span>
+                          </span>
+                          <span className="shrink-0 gap-2 text-[11px] tabular-nums">
+                            <span className="text-emerald-700 dark:text-emerald-400">
+                              +{candidate.additions}
+                            </span>
+                            <span className="text-red-700 dark:text-red-400">
+                              -{candidate.deletions}
+                            </span>
+                          </span>
+                          {viewedPaths.has(candidate.path) ? (
+                            <span
+                              aria-label="Viewed"
+                              className="shrink-0 text-primary"
+                            >
+                              ✓
+                            </span>
+                          ) : null}
+                          {openThreadCounts.get(candidate.path) ? (
+                            <span
+                              aria-label={`${openThreadCounts.get(candidate.path)} open comment threads`}
+                              title={`${openThreadCounts.get(candidate.path)} open comment threads`}
+                              className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary"
+                            >
+                              {openThreadCounts.get(candidate.path)}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                    {!visibleFiles.length ? (
+                      <p className="p-2 text-xs text-muted-foreground">
+                        No matching files.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </>
+            ) : null}
             <nav
               className="fixed bottom-0 left-0 right-0 z-20 flex items-stretch border-t bg-card/95 backdrop-blur lg:hidden"
               aria-label="Review sections"
@@ -4620,40 +5233,115 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                 Feedback
               </button>
             </nav>
-            {mobilePanel === "compose" &&
-            selection &&
-            selectionPath === file?.path ? (
-              <div className="fixed inset-0 z-40 flex items-start bg-black/40 p-3 pt-[max(0.75rem,env(safe-area-inset-top))] lg:hidden">
-                <div className="max-h-[85dvh] w-full overflow-auto rounded-xl border bg-background p-4 shadow-2xl">
-                  <Composer
-                    file={file}
-                    selection={selection}
-                    body={body}
-                    busy={busy}
-                    onBody={setBody}
-                    onAdd={add}
-                    onCancel={() => {
-                      const restoreKeyboardFocus = Boolean(keyboardRangeStart);
-                      setSelection(null);
-                      setSelectionPath(null);
-                      setKeyboardRangeStart(null);
-                      setKeyboardRangeValue(null);
-                      setBody("");
-                      setMobilePanel(null);
-                      if (restoreKeyboardFocus)
-                        requestAnimationFrame(() =>
-                          surfaceRefs.current
-                            .get(selectionSurface ?? "")
-                            ?.focus(),
-                        );
-                    }}
-                  />
-                </div>
-              </div>
-            ) : null}
+            <Drawer.Root
+              open={
+                mobileViewport &&
+                mobilePanel === "compose" &&
+                Boolean(selection) &&
+                selectionPath === file?.path
+              }
+              onOpenChange={(open) => {
+                if (open) return;
+                setMobilePanel(null);
+                if (!body.trim()) {
+                  const restoreKeyboardFocus = Boolean(keyboardRangeStart);
+                  setSelection(null);
+                  setSelectionPath(null);
+                  setKeyboardRangeStart(null);
+                  setKeyboardRangeValue(null);
+                  setBody("");
+                  if (restoreKeyboardFocus && selectionSurface)
+                    requestAnimationFrame(() =>
+                      surfaceRefs.current.get(selectionSurface)?.focus(),
+                    );
+                }
+              }}
+            >
+              <Drawer.Portal
+                data-bb-plugin={pluginId}
+                data-bb-plugin-root=""
+                data-bb-portaled-overlay=""
+              >
+                <Drawer.Overlay className="fixed inset-0 z-40 bg-black/40" />
+                <Drawer.Content
+                  data-bb-plugin={pluginId}
+                  data-bb-plugin-root=""
+                  data-bb-portaled-overlay=""
+                  aria-label="Comment composer"
+                  className="fixed bottom-0 left-0 right-0 z-50 mx-auto max-w-lg rounded-t-xl border bg-background p-4 shadow-2xl outline-none"
+                  style={{
+                    paddingBottom: "calc(env(safe-area-inset-bottom) + 1rem)",
+                  }}
+                >
+                  <Drawer.Title className="sr-only">
+                    Comment composer
+                  </Drawer.Title>
+                  <div className="mb-2 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-medium text-foreground">
+                      {selection?.side === "new" ? "New" : "Old"}{" "}
+                      {selection &&
+                        (selection.endLine === selection.startLine
+                          ? `line ${selection.startLine}`
+                          : `lines ${selection.startLine}-${selection.endLine}`)}
+                    </span>
+                    <span
+                      className="min-w-0 flex-1 truncate font-mono"
+                      title={file?.path}
+                    >
+                      {file?.path}
+                    </span>
+                  </div>
+                  {selection ? (
+                    <Composer
+                      file={file}
+                      selection={selection}
+                      body={body}
+                      busy={busy}
+                      onBody={setBody}
+                      onAdd={add}
+                      onCancel={() => {
+                        const restoreKeyboardFocus =
+                          Boolean(keyboardRangeStart);
+                        setSelection(null);
+                        setSelectionPath(null);
+                        setKeyboardRangeStart(null);
+                        setKeyboardRangeValue(null);
+                        setBody("");
+                        setMobilePanel(null);
+                        if (restoreKeyboardFocus)
+                          requestAnimationFrame(() =>
+                            surfaceRefs.current
+                              .get(selectionSurface ?? "")
+                              ?.focus(),
+                          );
+                      }}
+                    />
+                  ) : null}
+                </Drawer.Content>
+              </Drawer.Portal>
+            </Drawer.Root>
           </Dialog.Root>
         </>
       )}
+      {mobileCompareOpen ? (
+        <>
+          <button
+            type="button"
+            aria-hidden="true"
+            tabIndex={-1}
+            className="fixed inset-0 z-40 cursor-default lg:hidden"
+            onClick={() => setMobileCompareOpen(false)}
+          />
+          <div
+            role="dialog"
+            aria-label="Compare or refresh"
+            className="fixed left-2 right-2 z-50 max-h-[80dvh] overflow-auto rounded-xl border bg-popover p-3 shadow-2xl lg:hidden"
+            style={{ top: mobileMenuTop ?? 96 }}
+          >
+            {renderComparePanel()}
+          </div>
+        </>
+      ) : null}
     </main>
   );
 }

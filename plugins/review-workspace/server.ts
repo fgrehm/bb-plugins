@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { defineRpcContract, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { runRecentCommits } from "./lib/git-log";
+import { readBaseRefs, resolveBaseSuggestion } from "./lib/git-base-branch";
 import { normalizeChangeKind } from "./lib/utils";
 import { registerReviewCleanup } from "./lib/review-cleanup";
 import {
@@ -278,6 +279,7 @@ const reviewShape = z
     files: z.array(fileShape),
     annotations: z.array(annotationShape),
     viewedPaths: z.array(z.string()),
+    reviewedSectionIds: z.array(z.string()),
     summary: z.string().nullable(),
     tour: tourShape.nullable(),
   })
@@ -373,6 +375,19 @@ export const rpcContract = defineRpcContract({
       })
       .strict(),
     output: z.object({ viewed: z.boolean(), viewedCount: z.number().int() }),
+  },
+  setTourSectionReviewed: {
+    input: z
+      .object({
+        reviewId: z.string().uuid(),
+        stepId: z.string().min(1).max(100),
+        reviewed: z.boolean(),
+      })
+      .strict(),
+    output: z.object({
+      reviewed: z.boolean(),
+      reviewedCount: z.number().int(),
+    }),
   },
   reviewImageAsset: {
     input: z
@@ -506,6 +521,30 @@ export const rpcContract = defineRpcContract({
     }),
   },
 
+  // Suggests the base branch for "vs base" review targets from the thread's
+  // environment, so a checkout already on main compares with its upstream.
+  reviewEnvironment: {
+    input: z.object({ threadId: z.string().min(1) }).strict(),
+    output: z
+      // Only what a caller can act on: the suggestion, where it came from, and
+      // the branch it was derived against. Resolution-only refs stay internal.
+      .object({
+        status: z.enum(["ok", "unavailable"]),
+        reason: z.string().nullable(),
+        branchName: z.string().nullable(),
+        suggestedBase: z.string().nullable(),
+        suggestionSource: z
+          .enum([
+            "environment-merge-base",
+            "environment-base",
+            "upstream",
+            "remote-default",
+            "local-default",
+          ])
+          .nullable(),
+      })
+      .strict(),
+  },
   clearPreviousReviews: {
     input: z
       .object({ threadId: z.string().min(1), keepReviewId: z.string().uuid() })
@@ -679,6 +718,10 @@ export default async function plugin(bb: BbPluginApi) {
     `ALTER TABLE review_files ADD COLUMN new_identity TEXT`,
     `CREATE TABLE review_assets (review_id TEXT NOT NULL, path TEXT NOT NULL, side TEXT NOT NULL, mime_type TEXT NOT NULL, size_bytes INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL, sha256 TEXT NOT NULL, content_base64 TEXT NOT NULL, PRIMARY KEY (review_id, path, side), FOREIGN KEY (review_id) REFERENCES review_revisions (id) ON DELETE CASCADE)`,
     `CREATE TABLE review_tours (review_id TEXT PRIMARY KEY, title TEXT NOT NULL, overview TEXT, payload TEXT NOT NULL, updated_at INTEGER NOT NULL, FOREIGN KEY (review_id) REFERENCES review_revisions (id) ON DELETE CASCADE)`,
+    // Append-only (new): per-tour-section reviewed marks. Deliberately separate
+    // from review_viewed_files: reading a tour never marks files viewed.
+    `CREATE TABLE review_tour_sections (review_id TEXT NOT NULL, step_id TEXT NOT NULL, reviewed_at INTEGER NOT NULL, PRIMARY KEY (review_id, step_id), FOREIGN KEY (review_id) REFERENCES review_revisions (id) ON DELETE CASCADE)`,
+    `CREATE INDEX review_tour_sections_review_id ON review_tour_sections (review_id)`,
   ]);
   db.pragma("foreign_keys = ON");
   registerReviewCleanup(bb, db);
@@ -728,6 +771,15 @@ export default async function plugin(bb: BbPluginApi) {
         )
         .all(reviewId) as Array<{ path: string }>
     ).map((row) => row.path);
+  }
+  function reviewedSectionIds(reviewId: string): string[] {
+    return (
+      db
+        .prepare(
+          "SELECT step_id FROM review_tour_sections WHERE review_id = ? ORDER BY reviewed_at, step_id",
+        )
+        .all(reviewId) as Array<{ step_id: string }>
+    ).map((row) => row.step_id);
   }
   function imageSides(reviewId: string, path: string) {
     const rows = db
@@ -831,6 +883,14 @@ export default async function plugin(bb: BbPluginApi) {
       JSON.stringify(tour),
       tour.createdAt,
     );
+    // Re-authoring can rename or drop sections; their reviewed marks would be
+    // unreachable, so keep only marks whose section still exists.
+    const stepIds = new Set(tour.steps.map((step) => step.id));
+    const dropStale = db.prepare(
+      "DELETE FROM review_tour_sections WHERE review_id = ? AND step_id = ?",
+    );
+    for (const stepId of reviewedSectionIds(review.id))
+      if (!stepIds.has(stepId)) dropStale.run(review.id, stepId);
     return tour;
   }
   function read(reviewId: string): Review | null {
@@ -875,6 +935,7 @@ export default async function plugin(bb: BbPluginApi) {
       files,
       annotations: annotations(reviewId),
       viewedPaths: viewedPaths(reviewId),
+      reviewedSectionIds: reviewedSectionIds(reviewId),
       summary: reviewSummary(reviewId),
       tour: tourForReview(reviewId),
     };
@@ -1564,6 +1625,25 @@ export default async function plugin(bb: BbPluginApi) {
         viewedCount: viewedPaths(reviewId).length,
       };
     },
+    setTourSectionReviewed({ reviewId, stepId, reviewed }) {
+      const review = read(reviewId);
+      if (!review) throw new Error("Review revision was not found.");
+      if (!review.tour?.steps.some((step) => step.id === stepId))
+        throw new Error("That tour section is not part of this revision.");
+      if (reviewed) {
+        db.prepare(
+          "INSERT INTO review_tour_sections (review_id, step_id, reviewed_at) VALUES (?, ?, ?) ON CONFLICT(review_id, step_id) DO UPDATE SET reviewed_at = excluded.reviewed_at",
+        ).run(reviewId, stepId, Date.now());
+      } else {
+        db.prepare(
+          "DELETE FROM review_tour_sections WHERE review_id = ? AND step_id = ?",
+        ).run(reviewId, stepId);
+      }
+      return {
+        reviewed,
+        reviewedCount: reviewedSectionIds(reviewId).length,
+      };
+    },
     reviewImageAsset({ reviewId, filePath, side }) {
       const review = read(reviewId);
       if (!review || !review.files.some((file) => file.path === filePath))
@@ -1677,6 +1757,42 @@ export default async function plugin(bb: BbPluginApi) {
           commits: [],
         };
       }
+    },
+    async reviewEnvironment({ threadId }) {
+      const unavailable = (reason: string) => ({
+        status: "unavailable" as const,
+        reason,
+        branchName: null,
+        suggestedBase: null,
+        suggestionSource: null,
+      });
+      const thread = await bb.sdk.threads.get({ threadId });
+      if (!thread?.environmentId)
+        return unavailable("This thread has no environment.");
+      const env = await bb.sdk.environments.get({
+        environmentId: thread.environmentId,
+      });
+      if (!env?.path || !env.isGitRepo)
+        return unavailable("The review target needs a git checkout.");
+      const refs = await readBaseRefs(env.path, {
+        defaultBranch: env.defaultBranch ?? null,
+        hostBranchName: env.branchName ?? null,
+      });
+      const suggestion = resolveBaseSuggestion({
+        branchName: refs.branchName ?? env.branchName ?? null,
+        baseBranch: env.baseBranch ?? null,
+        mergeBaseBranch: env.mergeBaseBranch ?? null,
+        defaultBranch: env.defaultBranch ?? null,
+        upstream: refs.upstream,
+        remoteDefault: refs.remoteDefault,
+      });
+      return {
+        status: "ok" as const,
+        reason: null,
+        branchName: suggestion.branchName,
+        suggestedBase: suggestion.suggestedBase,
+        suggestionSource: suggestion.source,
+      };
     },
     addAnnotation(input) {
       return { annotation: addAnnotationInternal(input.reviewId, input) };
@@ -1862,7 +1978,6 @@ export default async function plugin(bb: BbPluginApi) {
         }))
         .sort((a, b) => (a.root?.createdAt ?? 0) - (b.root?.createdAt ?? 0));
       const batchId = randomUUID();
-      const claimedAt = Date.now();
       const claim = db.prepare(
         `UPDATE review_annotations SET batch_id = ? WHERE id = ? AND review_id = ? AND sent_at IS NULL AND batch_id IS NULL`,
       );
@@ -2013,6 +2128,9 @@ export default async function plugin(bb: BbPluginApi) {
         review.summary
           ? `Review note: ${review.summary}`
           : "Review note: (none)",
+        review.tour
+          ? `Tour: ${review.tour.title} (${review.tour.steps.length} section(s), ${review.reviewedSectionIds.length} marked reviewed${review.tour.steps.length ? `: ${review.tour.steps.map((step) => `${step.id}${review.reviewedSectionIds.includes(step.id) ? " [reviewed]" : ""}`).join(", ")}` : ""})`
+          : "Tour: (none)",
         "",
         `Changed files (${review.files.length}):`,
         ...review.files.map(

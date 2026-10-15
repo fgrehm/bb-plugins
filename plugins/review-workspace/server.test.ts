@@ -164,7 +164,7 @@ describe("Review Workspace server", () => {
   });
 
   it("migrates the viewed-file table in the dedicated plugin database", async () => {
-    const { bb, harness } = createFakePluginHost({
+    const { bb } = createFakePluginHost({
       pluginId: "review-workspace",
     });
 
@@ -576,6 +576,194 @@ describe("Review Workspace server", () => {
         .prepare("SELECT review_id FROM review_tours WHERE review_id = ?")
         .get(reviewId),
     ).toBeUndefined();
+  });
+
+  it("suggests a base branch from the thread environment", async () => {
+    const environment = {
+      path: "/nonexistent-checkout",
+      isGitRepo: true,
+      branchName: "main",
+      baseBranch: null,
+      defaultBranch: "main",
+      mergeBaseBranch: null,
+    };
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "review-workspace",
+      sdk: {
+        threads: { get: async () => ({ environmentId: "env-1" }) },
+        environments: { get: async () => environment },
+      } as any,
+    });
+    await plugin(bb);
+
+    // No usable checkout path: the host's merge base still wins when present.
+    await expect(
+      harness.behavior.callRpc("reviewEnvironment", { threadId: "thread-env" }),
+      // Exact shape: the reply carries only what a caller acts on, so a
+      // regression that re-adds resolution-only refs fails here.
+    ).resolves.toEqual({
+      status: "ok",
+      reason: null,
+      branchName: "main",
+      suggestedBase: null,
+      suggestionSource: null,
+    });
+
+    const withMergeBase = createFakePluginHost({
+      pluginId: "review-workspace",
+      sdk: {
+        threads: { get: async () => ({ environmentId: "env-1" }) },
+        environments: {
+          get: async () => ({ ...environment, mergeBaseBranch: "release/1.0" }),
+        },
+      } as any,
+    });
+    await plugin(withMergeBase.bb);
+    await expect(
+      withMergeBase.harness.behavior.callRpc("reviewEnvironment", {
+        threadId: "thread-env",
+      }),
+    ).resolves.toMatchObject({
+      suggestedBase: "release/1.0",
+      suggestionSource: "environment-merge-base",
+    });
+
+    const noEnvironment = createFakePluginHost({
+      pluginId: "review-workspace",
+      sdk: {
+        threads: { get: async () => ({}) },
+        environments: { get: async () => environment },
+      } as any,
+    });
+    await plugin(noEnvironment.bb);
+    await expect(
+      noEnvironment.harness.behavior.callRpc("reviewEnvironment", {
+        threadId: "thread-env",
+      }),
+    ).resolves.toEqual({
+      status: "unavailable",
+      reason: "This thread has no environment.",
+      branchName: null,
+      suggestedBase: null,
+      suggestionSource: null,
+    });
+
+    const notGit = createFakePluginHost({
+      pluginId: "review-workspace",
+      sdk: {
+        threads: { get: async () => ({ environmentId: "env-1" }) },
+        environments: {
+          get: async () => ({ ...environment, isGitRepo: false }),
+        },
+      } as any,
+    });
+    await plugin(notGit.bb);
+    await expect(
+      notGit.harness.behavior.callRpc("reviewEnvironment", {
+        threadId: "thread-env",
+      }),
+    ).resolves.toMatchObject({
+      status: "unavailable",
+      reason: "The review target needs a git checkout.",
+    });
+  });
+
+  it("tracks tour-section reviewed marks separately from file viewed state", async () => {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "review-workspace",
+    });
+    await plugin(bb);
+    const reviewId = randomUUID();
+    seedReview(bb, { id: reviewId, threadId: "thread-sections", createdAt: 1 });
+    await harness.behavior.callAgentTool(
+      "review_workspace_tour",
+      {
+        title: "Two sections",
+        steps: [
+          {
+            id: "alpha",
+            title: "Alpha",
+            blocks: [{ kind: "narrative", body: "First." }],
+          },
+          {
+            id: "beta",
+            title: "Beta",
+            blocks: [{ kind: "narrative", body: "Second." }],
+          },
+        ],
+      },
+      { threadId: "thread-sections" },
+    );
+
+    await expect(
+      harness.behavior.callRpc("setTourSectionReviewed", {
+        reviewId,
+        stepId: "alpha",
+        reviewed: true,
+      }),
+    ).resolves.toEqual({ reviewed: true, reviewedCount: 1 });
+    await expect(
+      harness.behavior.callRpc("setTourSectionReviewed", {
+        reviewId,
+        stepId: "alpha",
+        reviewed: true,
+      }),
+    ).resolves.toEqual({ reviewed: true, reviewedCount: 1 });
+    await expect(
+      harness.behavior.callRpc("setTourSectionReviewed", {
+        reviewId,
+        stepId: "beta",
+        reviewed: true,
+      }),
+    ).resolves.toMatchObject({ reviewedCount: 2 });
+
+    const loaded = (await harness.behavior.callRpc("review", {
+      threadId: "thread-sections",
+      reviewId,
+    })) as any;
+    expect(loaded.review.reviewedSectionIds).toEqual(["alpha", "beta"]);
+    // Section progress is independent of the file-level viewed state.
+    expect(loaded.review.viewedPaths).toEqual([]);
+
+    await harness.behavior.callRpc("setTourSectionReviewed", {
+      reviewId,
+      stepId: "alpha",
+      reviewed: false,
+    });
+    const afterUnmark = (await harness.behavior.callRpc("review", {
+      threadId: "thread-sections",
+      reviewId,
+    })) as any;
+    expect(afterUnmark.review.reviewedSectionIds).toEqual(["beta"]);
+
+    await expect(
+      harness.behavior.callRpc("setTourSectionReviewed", {
+        reviewId,
+        stepId: "not-a-section",
+        reviewed: true,
+      }),
+    ).rejects.toThrow("not part of this revision");
+
+    // Re-authoring drops marks for sections that no longer exist.
+    await harness.behavior.callAgentTool(
+      "review_workspace_tour",
+      {
+        title: "Renamed section",
+        steps: [
+          {
+            id: "gamma",
+            title: "Gamma",
+            blocks: [{ kind: "narrative", body: "Only section." }],
+          },
+        ],
+      },
+      { threadId: "thread-sections" },
+    );
+    const rewritten = (await harness.behavior.callRpc("review", {
+      threadId: "thread-sections",
+      reviewId,
+    })) as any;
+    expect(rewritten.review.reviewedSectionIds).toEqual([]);
   });
 
   it("bounds ordered tour blocks, rejects competing legacy input, and retains old saved data without breaking file review", async () => {
