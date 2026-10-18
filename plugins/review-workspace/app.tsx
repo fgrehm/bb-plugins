@@ -3884,6 +3884,23 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     const reviewedCount = tour.steps.filter((candidate) =>
       reviewedSections.has(candidate.id),
     ).length;
+    // Which changed files (in the current scope) the tour actually shows. This
+    // is deliberately file-counted rather than a changed-line ratio: file counts
+    // are visible in the rail and the file sheet, so the claim is checkable.
+    const tourAnchoredPaths = new Set(
+      tour.steps.flatMap((candidate) =>
+        candidate.anchors
+          .filter(
+            (anchor) =>
+              anchor.valid &&
+              (!tourScopePaths || tourScopePaths.has(anchor.filePath)),
+          )
+          .map((anchor) => anchor.filePath),
+      ),
+    );
+    const uncoveredFileCount = scopedFiles.filter(
+      (candidate) => !tourAnchoredPaths.has(candidate.path),
+    ).length;
     const stepReviewed = Boolean(step && reviewedSections.has(step.id));
     // Files this section actually shows an excerpt for, in reading order.
     const sectionFiles = (() => {
@@ -4137,38 +4154,22 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             })}
           </article>
         ) : null}
-        {tour.coverage.totalChangedLines > 0 ? (
-          <div className="mt-4 text-[11px] text-muted-foreground">
-            {tour.coverage.coveredChangedLines ===
-            tour.coverage.totalChangedLines
-              ? `${tour.coverage.coveredChangedLines} of ${tour.coverage.totalChangedLines} changed lines are anchored to tour excerpts.`
-              : `${tour.coverage.coveredChangedLines} of ${tour.coverage.totalChangedLines} changed lines are anchored to tour excerpts; coverage is not a reading or correctness verdict.`}
-            {[...new Set(tour.coverage.uncovered.map((line) => line.filePath))]
-              .length ? (
-              <details className="mt-2 rounded border p-2">
-                <summary className="cursor-pointer">
-                  Raw changes outside the tour →
-                </summary>
-                {[
-                  ...new Set(
-                    tour.coverage.uncovered.map((line) => line.filePath),
-                  ),
-                ].map((path) => (
-                  <button
-                    key={path}
-                    className="mt-2 block break-all text-left font-mono underline"
-                    onClick={() => {
-                      setReviewScope("all");
-                      setFileQuery("");
-                      setFileFilterMode("all");
-                      chooseFile(path);
-                    }}
-                  >
-                    {path} →
-                  </button>
-                ))}
-              </details>
-            ) : null}
+        {scopedFiles.length > 1 && uncoveredFileCount > 0 ? (
+          // Only says something when the tour is a subset: a complete tour
+          // needs no caveat, and a self-referential ratio helps nobody.
+          <div className="mt-4 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <span>
+              Tour covers {scopedFiles.length - uncoveredFileCount} of{" "}
+              {scopedFiles.length} changed files.
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[11px]"
+              onClick={() => switchReadingMode("files")}
+            >
+              Review the rest in Files
+            </Button>
           </div>
         ) : null}
       </div>

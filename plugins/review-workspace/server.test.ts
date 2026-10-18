@@ -668,6 +668,80 @@ describe("Review Workspace server", () => {
     });
   });
 
+  it("stores tour coverage counts without the per-line list, and still reports it to the agent", async () => {
+    const { bb, harness } = createFakePluginHost({
+      pluginId: "review-workspace",
+    });
+    await plugin(bb);
+    const reviewId = randomUUID();
+    const db = seedReview(bb, {
+      id: reviewId,
+      threadId: "thread-coverage",
+      createdAt: 1,
+    });
+    // 60 changed lines, one tiny anchor: the uncovered list would be large.
+    const lines = Array.from({ length: 60 }, (_, index) => `+line ${index}`);
+    db.prepare(
+      "UPDATE review_files SET patch = ? WHERE review_id = ? AND path = ?",
+    ).run(`@@ -1,0 +1,60 @@\n${lines.join("\n")}`, reviewId, "src/example.ts");
+
+    const authored = parseToolResult(
+      await harness.behavior.callAgentTool(
+        "review_workspace_tour",
+        {
+          title: "Tiny tour",
+          steps: [
+            {
+              id: "one",
+              title: "One",
+              blocks: [
+                { kind: "narrative", body: "One line matters." },
+                {
+                  kind: "diff",
+                  anchor: {
+                    filePath: "src/example.ts",
+                    side: "new",
+                    startLine: 1,
+                    endLine: 1,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+        { threadId: "thread-coverage" },
+      ),
+    );
+    // The authoring agent still learns what the tour missed.
+    expect(authored.coverage.uncoveredCount).toBeGreaterThan(50);
+    expect(authored.coverage.uncovered.length).toBeGreaterThan(0);
+
+    const stored = db
+      .prepare("SELECT payload FROM review_tours WHERE review_id = ?")
+      .get(reviewId) as { payload: string };
+    const payload = JSON.parse(stored.payload);
+    expect(payload.coverage.coveredChangedLines).toBe(
+      authored.coverage.coveredChangedLines,
+    );
+    expect(payload.coverage.totalChangedLines).toBe(
+      authored.coverage.totalChangedLines,
+    );
+    // But the stored payload keeps only the counts.
+    expect(payload.coverage.uncovered).toEqual([]);
+    expect(stored.payload.length).toBeLessThan(4000);
+
+    // Reading it back still yields a valid tour with intact coverage counts.
+    const loaded = (await harness.behavior.callRpc("review", {
+      threadId: "thread-coverage",
+      reviewId,
+    })) as any;
+    expect(loaded.review.tour.coverage).toMatchObject({
+      coveredChangedLines: payload.coverage.coveredChangedLines,
+      totalChangedLines: payload.coverage.totalChangedLines,
+      uncovered: [],
+    });
+  });
+
   it("tracks tour-section reviewed marks separately from file viewed state", async () => {
     const { bb, harness } = createFakePluginHost({
       pluginId: "review-workspace",

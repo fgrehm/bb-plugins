@@ -881,13 +881,21 @@ export default async function plugin(bb: BbPluginApi) {
   }
   function saveTour(review: Review, input: z.infer<typeof tourInputShape>) {
     const tour = buildTour(review, input);
+    // Persist the counts but not the per-line list: nothing reads it back (the
+    // authoring agent gets it from the return value, and the UI counts files),
+    // and for a large changeset it was 70-90% of the stored payload. Older
+    // payloads that still carry it keep validating against tourShape.
+    const stored: ReviewTour = {
+      ...tour,
+      coverage: { ...tour.coverage, uncovered: [] },
+    };
     db.prepare(
       "INSERT INTO review_tours (review_id, title, overview, payload, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(review_id) DO UPDATE SET title = excluded.title, overview = excluded.overview, payload = excluded.payload, updated_at = excluded.updated_at",
     ).run(
       review.id,
       input.title,
       input.overview ?? null,
-      JSON.stringify(tour),
+      JSON.stringify(stored),
       tour.createdAt,
     );
     // Re-authoring can rename or drop sections; their reviewed marks would be

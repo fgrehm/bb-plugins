@@ -3131,6 +3131,117 @@ describe("Review Workspace app", () => {
     slot.lifecycle.unmount();
   });
 
+  const tourFileCountFixture = (anchoredPaths: string[]) => {
+    const base = reviewFixture();
+    const files = [
+      ...base.files,
+      {
+        ...base.files[0]!,
+        path: "docs/guide.md",
+        patch: patch.replaceAll("src/example.ts", "docs/guide.md"),
+      },
+      {
+        ...base.files[0]!,
+        path: "src/other.ts",
+        patch: patch.replaceAll("src/example.ts", "src/other.ts"),
+      },
+    ];
+    const anchors = anchoredPaths.map((filePath) => ({
+      filePath,
+      side: "new" as const,
+      startLine: 1,
+      endLine: 1,
+      valid: true,
+      reason: null,
+    }));
+    return {
+      ...base,
+      files,
+      tour: {
+        reviewId: base.id,
+        title: "Tour",
+        overview: null,
+        createdAt: 1,
+        steps: [
+          {
+            id: "one",
+            title: "One",
+            anchors,
+            blocks: [
+              { kind: "narrative" as const, body: "Read these." },
+              ...anchors.map((anchor) => ({
+                kind: "diff" as const,
+                anchor,
+              })),
+            ],
+          },
+        ],
+        coverage: {
+          totalChangedLines: 6,
+          coveredChangedLines: anchoredPaths.length,
+          uncovered: [],
+        },
+      },
+    };
+  };
+
+  it("states how many changed files the tour covers, and stays quiet when it covers all", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    // A tour that anchors 1 of 3 changed files must say so, and offer the way
+    // out. There is deliberately no changed-line ratio or coverage disclaimer.
+    const partial = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "review/thread-ui" },
+      {
+        rpc: {
+          review: async () => ({
+            review: tourFileCountFixture(["src/example.ts"]),
+          }),
+          revisions: async () => ({ revisions: [] }),
+        } as any,
+      },
+    );
+    fireEvent.click(await partial.findByRole("button", { name: "Tour" }));
+    expect(
+      await partial.findByText("Tour covers 1 of 3 changed files."),
+    ).toBeTruthy();
+    expect(partial.queryByText(/anchored to tour excerpts/)).toBeNull();
+    expect(partial.queryByText(/coverage is not a reading/)).toBeNull();
+    expect(partial.queryByText("Raw changes outside the tour →")).toBeNull();
+    // The offered action returns to the complete document.
+    fireEvent.click(
+      partial.getByRole("button", { name: "Review the rest in Files" }),
+    );
+    expect(
+      partial
+        .getByRole("button", { name: "Files" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    partial.lifecycle.unmount();
+
+    // A complete tour says nothing at all.
+    const complete = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "review/thread-ui" },
+      {
+        rpc: {
+          review: async () => ({
+            review: tourFileCountFixture([
+              "src/example.ts",
+              "docs/guide.md",
+              "src/other.ts",
+            ]),
+          }),
+          revisions: async () => ({ revisions: [] }),
+        } as any,
+      },
+    );
+    fireEvent.click(await complete.findByRole("button", { name: "Tour" }));
+    await complete.findByText("Read these.");
+    expect(complete.queryByText(/Tour covers/)).toBeNull();
+    complete.lifecycle.unmount();
+  });
+
   it("marks tour sections reviewed without touching file viewed state", async () => {
     const app = await loadPluginApp(() => import("./app"));
     const base = reviewFixture();
@@ -3448,9 +3559,8 @@ describe("Review Workspace app", () => {
     ).toBeTruthy();
     expect(document.getByText("I'll clarify that wording.")).toBeTruthy();
     expect(document.queryByText("This belongs to another step.")).toBeNull();
-    expect(
-      document.getByText(/changed lines are anchored to tour excerpts/),
-    ).toBeTruthy();
+    // The tour's remaining-changes line is covered by its own test; here the
+    // assertion is only that the tour body rendered before navigating away.
     fireEvent.click(document.getByRole("button", { name: "Full file →" }));
     fireEvent.click(slot.getByLabelText("Changed file", { exact: true }));
     await vi.waitFor(() => {
