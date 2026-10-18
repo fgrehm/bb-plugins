@@ -15,9 +15,10 @@ import {
   useCaseLabel,
   type Prompt,
   type Rating,
+  type RetroDraft,
   type UseCase,
 } from "./model";
-import type { rpcContract, RatingSummary } from "./server";
+import type { rpcContract, RatingSummary, RetroDraftSummary } from "./server";
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -35,11 +36,13 @@ function useRefreshOnReconnect(refresh: () => void) {
 }
 
 function FeedbackForm({
-  rating,
+  seed,
+  draftedByAgent = false,
   pending,
   onSubmit,
 }: {
-  rating: Rating | null;
+  seed: { score: number; useCases: UseCase[]; note: string } | null;
+  draftedByAgent?: boolean;
   pending: boolean;
   onSubmit: (feedback: {
     score: number;
@@ -48,11 +51,11 @@ function FeedbackForm({
   }) => Promise<void>;
 }) {
   const id = useId();
-  const [score, setScore] = useState(rating?.score ?? 0);
+  const [score, setScore] = useState(seed?.score ?? 0);
   const [useCases, setUseCases] = useState<UseCase[]>(
-    rating?.useCases ?? ["coding"],
+    seed?.useCases ?? ["coding"],
   );
-  const [note, setNote] = useState(rating?.note ?? "");
+  const [note, setNote] = useState(seed?.note ?? "");
   const toggleUseCase = (value: UseCase) =>
     setUseCases((current) => {
       const next = current.includes(value)
@@ -69,6 +72,12 @@ function FeedbackForm({
           void onSubmit({ score, useCases, note });
       }}
     >
+      {draftedByAgent ? (
+        <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+          Drafted by an agent in this chat. Check the score and note before
+          saving.
+        </p>
+      ) : null}
       <fieldset disabled={pending} className="space-y-2">
         <legend className="mb-2 text-sm font-medium">
           How useful was this chat?
@@ -180,16 +189,22 @@ function ArchivePrompt({
     "data-bb-portaled-overlay": "",
   };
   const [rating, setRating] = useState<Rating | null>(null);
+  const [draft, setDraft] = useState<RetroDraft | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(() => {
     let cancelled = false;
     setError(null);
-    rpc.call("getRating", { threadId: prompt.threadId }).then(
-      (value) => {
+    Promise.all([
+      rpc.call("getRating", { threadId: prompt.threadId }),
+      rpc.call("getDraft", { threadId: prompt.threadId }),
+    ]).then(
+      ([saved, parked]) => {
         if (!cancelled) {
-          setRating(value);
+          setRating(saved);
+          // A saved rating wins; a stray draft stays in the sidebar list.
+          setDraft(saved ? null : parked);
           setLoaded(true);
         }
       },
@@ -254,7 +269,8 @@ function ArchivePrompt({
           </p>
           {loaded ? (
             <FeedbackForm
-              rating={rating}
+              seed={rating ?? draft}
+              draftedByAgent={draft !== null}
               pending={pending}
               onSubmit={async (feedback) => {
                 setPending(true);
@@ -265,6 +281,7 @@ function ArchivePrompt({
                     threadId: prompt.threadId,
                     archivedAt: prompt.archivedAt,
                     expectedRevision: rating?.revision ?? null,
+                    draftFiledAt: draft?.filedAt ?? null,
                   });
                   onDone();
                 } catch (cause) {
@@ -399,10 +416,13 @@ function RatingsPage() {
   const rpc = useRpc<typeof rpcContract>();
   const [rows, setRows] = useState<RatingSummary[]>([]);
   const [total, setTotal] = useState(0);
+  const [drafts, setDrafts] = useState<RetroDraftSummary[]>([]);
+  const [draftTotal, setDraftTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Rating | null>(null);
+  const [confirming, setConfirming] = useState<RetroDraftSummary | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const generation = useRef(0);
@@ -423,11 +443,16 @@ function RatingsPage() {
   }, []);
   const refresh = useCallback(() => {
     const request = ++generation.current;
-    rpc.call("list", { offset }).then(
-      (value) => {
+    Promise.all([
+      rpc.call("list", { offset }),
+      rpc.call("retroDrafts", { offset: 0 }),
+    ]).then(
+      ([ratings, retros]) => {
         if (request === generation.current) {
-          setRows(value.ratings);
-          setTotal(value.total);
+          setRows(ratings.ratings);
+          setTotal(ratings.total);
+          setDrafts(retros.drafts);
+          setDraftTotal(retros.total);
           setLoaded(true);
           setError(null);
         }
@@ -465,7 +490,7 @@ function RatingsPage() {
           [
             JSON.stringify(
               {
-                schemaVersion: 2,
+                schemaVersion: 3,
                 exportedAt: new Date().toISOString(),
                 ratings,
               },
@@ -519,14 +544,121 @@ function RatingsPage() {
           </div>
         </header>
         <p className="text-sm text-muted-foreground">
-          Ratings are offered after you archive a chat. Scores apply to the
-          whole conversation, including all recorded model and reasoning
-          variations, not to each model individually.
+          Ratings are offered after you archive a chat. Retros filed by an agent
+          wait here until you confirm them. Scores apply to the whole
+          conversation, including all recorded model and reasoning variations,
+          not to each model individually.
         </p>
         {error ? (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
+        ) : null}
+        {loaded && drafts.length > 0 ? (
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Retros waiting for you</h2>
+              <span className="text-xs text-muted-foreground">
+                {draftTotal} draft{draftTotal === 1 ? "" : "s"}
+                {draftTotal > drafts.length
+                  ? ` · newest ${drafts.length} shown`
+                  : ""}
+              </span>
+            </div>
+            {drafts.map((draft) => (
+              <article
+                key={draft.subjectThreadId}
+                className="space-y-3 rounded-xl border border-dashed border-border bg-card p-5"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="font-medium break-words">
+                      {draft.subjectTitle}
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {draft.useCases.map(useCaseLabel).join(", ")} · drafted{" "}
+                      {new Date(draft.filedAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <span className="flex shrink-0 items-center gap-1 rounded-lg bg-primary/10 px-3 py-1 text-sm font-semibold">
+                    <Icon name="Star" className="size-4" />
+                    {draft.score}/5
+                  </span>
+                </div>
+                {draft.note ? (
+                  <p className="whitespace-pre-wrap break-words text-sm">
+                    {draft.note}
+                  </p>
+                ) : null}
+                {confirming?.subjectThreadId === draft.subjectThreadId ? (
+                  <div className="space-y-2 border-t border-border pt-4">
+                    <FeedbackForm
+                      key={draft.filedAt}
+                      seed={draft}
+                      draftedByAgent
+                      pending={busy}
+                      onSubmit={async (feedback) => {
+                        setBusy(true);
+                        setError(null);
+                        try {
+                          await rpc.call("confirmDraft", {
+                            ...feedback,
+                            subjectThreadId: draft.subjectThreadId,
+                            expectedRevision: draft.ratingRevision,
+                            draftFiledAt: draft.filedAt,
+                          });
+                          setConfirming(null);
+                          refresh();
+                        } catch (cause) {
+                          setError(errorText(cause));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    />
+                    <Button
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() => setConfirming(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      disabled={busy}
+                      onClick={() => setConfirming(draft)}
+                    >
+                      Confirm
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true);
+                        setError(null);
+                        try {
+                          await rpc.call("discardDraft", {
+                            subjectThreadId: draft.subjectThreadId,
+                          });
+                          refresh();
+                        } catch (cause) {
+                          setError(errorText(cause));
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
+                      Discard
+                    </Button>
+                  </div>
+                )}
+              </article>
+            ))}
+          </section>
         ) : null}
         {!loaded ? (
           <p role="status">Loading ratings…</p>
@@ -546,6 +678,7 @@ function RatingsPage() {
                   <p className="mt-1 text-xs text-muted-foreground">
                     {rating.useCases.map(useCaseLabel).join(", ")} ·{" "}
                     {new Date(rating.updatedAt).toLocaleDateString()}
+                    {rating.draft ? " · drafted by an agent" : ""}
                   </p>
                 </div>
                 <span className="flex shrink-0 items-center gap-1 rounded-lg bg-primary/10 px-3 py-1 text-sm font-semibold">
@@ -571,7 +704,7 @@ function RatingsPage() {
                 <div className="space-y-2 border-t border-border pt-4">
                   <FeedbackForm
                     key={editing.revision}
-                    rating={editing}
+                    seed={editing}
                     pending={busy}
                     onSubmit={async (feedback) => {
                       setBusy(true);

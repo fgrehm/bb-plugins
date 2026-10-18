@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Let an agent draft a retro for its own chat or a direct subthread through the `file_retro` tool, with confirmation or discarding in the sidebar.
+- Record which thread drafted a confirmed rating and bump the JSON export schema to 3.
 - Offer skippable whole-chat ratings only after archiving a visible chat, with no always-visible rating action.
 - Rate usefulness from 1 to 5, select one or more purposes (coding, design, debugging, review, research, planning, writing, other), and add an optional note.
 - Capture recorded model and reasoning variations, provider fallbacks, and partial-metadata warnings from local BB event history when saving.

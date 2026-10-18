@@ -58,26 +58,46 @@ export const ratingSchema = z.object({
   note: z.string().max(4000),
   createdAt: z.number(),
   updatedAt: z.number(),
-  archivedAt: z.number(),
+  archivedAt: z.number().nullable(),
   revision: z.number().int().positive(),
+  draft: z
+    .object({
+      by: z.literal("agent"),
+      draftedByThreadId: z.string(),
+      draftedAt: z.number(),
+    })
+    .nullable(),
   history: historySchema,
 });
 export type Rating = z.infer<typeof ratingSchema>;
 
-// Older records stored one `useCase` string. Normalize them in memory so the
-// rest of the plugin only handles `useCases`.
+// A retro an agent filed for a chat. It is a draft, not feedback, until the
+// person confirms it into that chat's rating.
+export const retroDraftSchema = z.object({
+  subjectThreadId: z.string(),
+  subjectTitle: z.string(),
+  filedByThreadId: z.string(),
+  projectId: z.string(),
+  score: z.number().int().min(1).max(5),
+  useCases: useCasesSchema,
+  note: z.string().max(4000),
+  filedAt: z.number(),
+});
+export type RetroDraft = z.infer<typeof retroDraftSchema>;
+
+// Older records stored one `useCase` string and no draft provenance.
+// Normalize them in memory so the rest of the plugin handles one shape.
 export function normalizeStoredRating(value: unknown): unknown {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    !("useCase" in value) ||
-    "useCases" in value
-  )
+  if (value === null || typeof value !== "object" || Array.isArray(value))
     return value;
-  const { useCase, ...rest } = value as Record<string, unknown>;
-  const parsed = useCaseSchema.safeParse(useCase);
-  return { ...rest, useCases: [parsed.success ? parsed.data : "other"] };
+  const record = { ...(value as Record<string, unknown>) };
+  if (!("draft" in record)) record.draft = null;
+  if ("useCase" in record && !("useCases" in record)) {
+    const parsed = useCaseSchema.safeParse(record.useCase);
+    delete record.useCase;
+    record.useCases = [parsed.success ? parsed.data : "other"];
+  }
+  return record;
 }
 export const promptSchema = z.object({
   threadId: z.string(),

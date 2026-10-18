@@ -6,8 +6,10 @@ import {
   normalizeStoredRating,
   promptSchema,
   ratingSchema,
+  retroDraftSchema,
   useCasesSchema,
   type Rating,
+  type RetroDraft,
 } from "./model";
 
 const threadIdSchema = z.string().min(1).max(200);
@@ -16,6 +18,13 @@ const feedbackSchema = z.object({
   useCases: useCasesSchema,
   note: z.string().trim().max(4000),
 });
+const retroParameters = z.object({
+  subjectThreadId: threadIdSchema.optional(),
+  score: z.number().int().min(1).max(5),
+  useCases: useCasesSchema,
+  note: z.string().max(4000).optional(),
+});
+const RETRO_TOOL = "file_retro";
 const variationSchema = z.object({
   model: z.string().nullable(),
   reasoningLevel: z.string().nullable(),
@@ -28,6 +37,10 @@ const summarySchema = ratingSchema.omit({ history: true }).extend({
   variationCount: z.number(),
 });
 export type RatingSummary = z.infer<typeof summarySchema>;
+const draftSummarySchema = retroDraftSchema.extend({
+  ratingRevision: z.number().int().positive().nullable(),
+});
+export type RetroDraftSummary = z.infer<typeof draftSummarySchema>;
 export const rpcContract = defineRpcContract({
   pending: {
     input: z.null(),
@@ -49,9 +62,37 @@ export const rpcContract = defineRpcContract({
         threadId: threadIdSchema,
         archivedAt: z.number(),
         expectedRevision: z.number().int().positive().nullable(),
+        draftFiledAt: z.number().nullable().default(null),
       })
       .strict(),
     output: ratingSchema,
+  },
+  confirmDraft: {
+    input: feedbackSchema
+      .extend({
+        subjectThreadId: threadIdSchema,
+        expectedRevision: z.number().int().positive().nullable(),
+        draftFiledAt: z.number(),
+      })
+      .strict(),
+    output: ratingSchema,
+  },
+  getDraft: {
+    input: z.object({ threadId: threadIdSchema }).strict(),
+    output: retroDraftSchema.nullable(),
+  },
+  retroDrafts: {
+    input: z
+      .object({ offset: z.number().int().nonnegative().default(0) })
+      .strict(),
+    output: z.object({
+      drafts: z.array(draftSummarySchema),
+      total: z.number(),
+    }),
+  },
+  discardDraft: {
+    input: z.object({ subjectThreadId: threadIdSchema }).strict(),
+    output: z.object({ removed: z.boolean() }),
   },
   editRating: {
     input: feedbackSchema
@@ -94,6 +135,8 @@ export default function plugin(bb: BbPluginApi) {
     `CREATE TABLE prompts (thread_id TEXT PRIMARY KEY, title TEXT NOT NULL, archived_at INTEGER NOT NULL)`,
     `CREATE TABLE revision_clock (id INTEGER PRIMARY KEY CHECK (id = 1), value INTEGER NOT NULL)`,
     `INSERT INTO revision_clock VALUES (1, COALESCE((SELECT MAX(revision) FROM ratings), 0))`,
+    `CREATE TABLE retro_drafts (thread_id TEXT PRIMARY KEY, record TEXT NOT NULL, filed_at INTEGER NOT NULL)`,
+    `CREATE INDEX retro_draft_order ON retro_drafts(filed_at)`,
   ]);
   const lifetime = new AbortController();
   bb.onDispose(() => lifetime.abort());
@@ -129,6 +172,113 @@ export default function plugin(bb: BbPluginApi) {
     !!db
       .prepare("SELECT 1 FROM prompts WHERE thread_id = ? AND archived_at = ?")
       .get(threadId, archivedAt);
+  const getDraft = (subjectThreadId: string): RetroDraft | null => {
+    const row = db
+      .prepare("SELECT record FROM retro_drafts WHERE thread_id = ?")
+      .get(subjectThreadId) as { record: string } | undefined;
+    return row ? retroDraftSchema.parse(JSON.parse(row.record)) : null;
+  };
+  type ThreadFacts = {
+    projectId: string;
+    providerId: string;
+    title: string | null;
+    titleFallback: string | null;
+    archivedAt: number | null;
+    deletedAt: number | null;
+    visibility: string;
+  };
+  // Shared by archive saves and retro confirmations: capture history, then
+  // write the rating and any matching draft provenance in one transaction.
+  const saveRating = async ({
+    threadId,
+    expectedRevision,
+    score,
+    useCases,
+    note,
+    draftFiledAt,
+    archivedAt,
+    prompt,
+    thread: knownThread,
+    signal: knownSignal,
+  }: {
+    threadId: string;
+    expectedRevision: number | null;
+    score: number;
+    useCases: Rating["useCases"];
+    note: string;
+    draftFiledAt: number | null;
+    archivedAt?: number;
+    prompt?: { threadId: string; archivedAt: number };
+    thread?: ThreadFacts;
+    signal?: AbortSignal;
+  }) => {
+    const signal =
+      knownSignal ??
+      AbortSignal.any([lifetime.signal, AbortSignal.timeout(30_000)]);
+    const thread =
+      knownThread ?? (await bb.sdk.threads.get({ threadId, signal }));
+    if (thread.deletedAt !== null || thread.visibility === "hidden")
+      throw new Error("This chat is no longer available.");
+    const history = await captureHistory((args) =>
+      bb.sdk.threads.events.list({
+        ...args,
+        threadId,
+        types: HISTORY_TYPES,
+        signal,
+      }),
+    );
+    const rating = db.transaction(() => {
+      if (prompt && !hasPrompt(prompt.threadId, prompt.archivedAt))
+        throw new Error(
+          "This archive prompt was dismissed or changed in another window.",
+        );
+      const current = checkRevision(threadId, expectedRevision);
+      const now = Date.now();
+      const draft = draftFiledAt === null ? null : getDraft(threadId);
+      const matchedDraft =
+        draft !== null && draft.filedAt === draftFiledAt ? draft : null;
+      if (draftFiledAt !== null && matchedDraft === null)
+        throw new Error(
+          "This retro changed or was dismissed. Reload before saving.",
+        );
+      const next: Rating = {
+        threadId,
+        projectId: thread.projectId,
+        providerId: thread.providerId,
+        title: thread.title ?? thread.titleFallback ?? threadId,
+        archivedAt:
+          archivedAt !== undefined
+            ? archivedAt
+            : (current?.archivedAt ?? thread.archivedAt ?? null),
+        score,
+        useCases,
+        note,
+        history,
+        draft: matchedDraft
+          ? {
+              by: "agent",
+              draftedByThreadId: matchedDraft.filedByThreadId,
+              draftedAt: matchedDraft.filedAt,
+            }
+          : (current?.draft ?? null),
+        revision: nextRevision(),
+        createdAt: current?.createdAt ?? now,
+        updatedAt: now,
+      };
+      put(next);
+      if (prompt)
+        db.prepare(
+          "DELETE FROM prompts WHERE thread_id = ? AND archived_at = ?",
+        ).run(prompt.threadId, prompt.archivedAt);
+      if (matchedDraft)
+        db.prepare("DELETE FROM retro_drafts WHERE thread_id = ?").run(
+          threadId,
+        );
+      return next;
+    })();
+    changed();
+    return rating;
+  };
   const put = (rating: Rating) => {
     db.prepare(
       "INSERT INTO ratings(thread_id, revision, record) VALUES (?, ?, ?) ON CONFLICT(thread_id) DO UPDATE SET revision = excluded.revision, record = excluded.record",
@@ -170,12 +320,64 @@ export default function plugin(bb: BbPluginApi) {
   });
   for (const event of ["thread.unarchived", "thread.deleted"] as const)
     bb.events.on(event, ({ thread }) => {
-      if (
+      let dirty =
         db.prepare("DELETE FROM prompts WHERE thread_id = ?").run(thread.id)
-          .changes
-      )
-        changed();
+          .changes > 0;
+      if (event === "thread.deleted")
+        dirty =
+          db
+            .prepare("DELETE FROM retro_drafts WHERE thread_id = ?")
+            .run(thread.id).changes > 0 || dirty;
+      if (dirty) changed();
     });
+
+  bb.agents.registerTool({
+    name: RETRO_TOOL,
+    description:
+      "Draft a short retrospective rating for this chat or for a subthread it spawned, covering the whole conversation. The user reviews, edits, and confirms the draft before it becomes a saved rating. Use it when the user asks for a retro of the work.",
+    presentation: {
+      label: { pending: "Filing a retro", completed: "Filed a retro" },
+    },
+    parameters: retroParameters,
+    async execute({ subjectThreadId, score, useCases, note }, ctx) {
+      const subjectId = subjectThreadId ?? ctx.threadId;
+      const subject = await bb.sdk.threads.get({
+        threadId: subjectId,
+        signal: ctx.signal,
+      });
+      if (subject.deletedAt !== null || subject.visibility === "hidden")
+        throw new Error(
+          "That chat is deleted or hidden, so it cannot be rated.",
+        );
+      if (subjectId !== ctx.threadId && subject.parentThreadId !== ctx.threadId)
+        throw new Error(
+          "You can only rate this chat or a chat that is its direct subthread.",
+        );
+      if (subject.projectId !== ctx.projectId)
+        throw new Error("That chat belongs to a different project.");
+      const title = subject.title ?? subject.titleFallback ?? subjectId;
+      const draft: RetroDraft = {
+        subjectThreadId: subjectId,
+        subjectTitle: title,
+        filedByThreadId: ctx.threadId,
+        projectId: ctx.projectId,
+        score,
+        useCases,
+        note: (note ?? "").trim(),
+        filedAt: Date.now(),
+      };
+      db.prepare(
+        "INSERT INTO retro_drafts(thread_id, record, filed_at) VALUES (?, ?, ?) ON CONFLICT(thread_id) DO UPDATE SET record = excluded.record, filed_at = excluded.filed_at",
+      ).run(subjectId, JSON.stringify(draft), draft.filedAt);
+      changed();
+      const label = title.length > 80 ? `${title.slice(0, 77)}...` : title;
+      return `Retro draft recorded for "${label}". It waits for the user to review and confirm it.`;
+    },
+  });
+  bb.agents.configure((context) => ({
+    tools: context.origin.pluginId === null ? [RETRO_TOOL] : [],
+    skills: [],
+  }));
 
   bb.rpc.register(rpcContract, {
     async pending() {
@@ -254,6 +456,7 @@ export default function plugin(bb: BbPluginApi) {
       threadId,
       archivedAt,
       expectedRevision,
+      draftFiledAt,
       score,
       useCases,
       note,
@@ -274,43 +477,70 @@ export default function plugin(bb: BbPluginApi) {
         throw new Error(
           "The chat is no longer archived at this point. Dismiss this prompt.",
         );
-      const history = await captureHistory((args) =>
-        bb.sdk.threads.events.list({
-          ...args,
-          threadId,
-          types: HISTORY_TYPES,
-          signal,
+      return saveRating({
+        threadId,
+        expectedRevision,
+        score,
+        useCases,
+        note,
+        draftFiledAt,
+        archivedAt,
+        prompt: { threadId, archivedAt },
+        thread,
+        signal,
+      });
+    },
+    confirmDraft({
+      subjectThreadId,
+      expectedRevision,
+      draftFiledAt,
+      score,
+      useCases,
+      note,
+    }) {
+      const draft = getDraft(subjectThreadId);
+      if (!draft || draft.filedAt !== draftFiledAt)
+        throw new Error(
+          "This retro changed or was dismissed. Reload before saving.",
+        );
+      return saveRating({
+        threadId: subjectThreadId,
+        expectedRevision,
+        score,
+        useCases,
+        note,
+        draftFiledAt,
+      });
+    },
+    getDraft: ({ threadId }) => getDraft(threadId),
+    retroDrafts({ offset }) {
+      const rows = db
+        .prepare(
+          "SELECT record FROM retro_drafts ORDER BY filed_at DESC, thread_id LIMIT 50 OFFSET ?",
+        )
+        .all(offset) as { record: string }[];
+      return {
+        drafts: rows.map((row) => {
+          const draft = retroDraftSchema.parse(JSON.parse(row.record));
+          return {
+            ...draft,
+            ratingRevision: get(draft.subjectThreadId)?.revision ?? null,
+          };
         }),
-      );
-      const rating = db.transaction(() => {
-        if (!hasPrompt(threadId, archivedAt))
-          throw new Error(
-            "This archive prompt was dismissed or changed in another window.",
-          );
-        const current = checkRevision(threadId, expectedRevision);
-        const now = Date.now();
-        const next: Rating = {
-          threadId,
-          projectId: thread.projectId,
-          providerId: thread.providerId,
-          title: thread.title ?? thread.titleFallback ?? threadId,
-          archivedAt,
-          score,
-          useCases,
-          note,
-          history,
-          revision: nextRevision(),
-          createdAt: current?.createdAt ?? now,
-          updatedAt: now,
-        };
-        put(next);
-        db.prepare(
-          "DELETE FROM prompts WHERE thread_id = ? AND archived_at = ?",
-        ).run(threadId, archivedAt);
-        return next;
-      })();
-      changed();
-      return rating;
+        total: (
+          db.prepare("SELECT count(*) AS total FROM retro_drafts").get() as {
+            total: number;
+          }
+        ).total,
+      };
+    },
+    discardDraft({ subjectThreadId }) {
+      const removed =
+        db
+          .prepare("DELETE FROM retro_drafts WHERE thread_id = ?")
+          .run(subjectThreadId).changes > 0;
+      if (removed) changed();
+      return { removed };
     },
     editRating({ threadId, expectedRevision, score, useCases, note }) {
       const next = db.transaction(() => {
@@ -334,6 +564,9 @@ export default function plugin(bb: BbPluginApi) {
       const removed = db.transaction(() => {
         checkRevision(threadId, expectedRevision);
         db.prepare("DELETE FROM observations WHERE thread_id = ?").run(
+          threadId,
+        );
+        db.prepare("DELETE FROM retro_drafts WHERE thread_id = ?").run(
           threadId,
         );
         return (

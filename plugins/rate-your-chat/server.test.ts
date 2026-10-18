@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createFakePluginHost,
+  makePluginAgentConfigurationContext,
   makeThreadResponse,
   experimental_scanPublicSdkOnly,
 } from "@get-bb/plugin-sdk/testing";
@@ -18,12 +19,21 @@ const thread = makeThreadResponse({
   title: "Example chat",
   archivedAt: 1000,
 });
-async function setup() {
+async function setup(extraThreads: Record<string, typeof thread> = {}) {
+  const threads = { [thread.id]: thread, ...extraThreads };
   const host = createFakePluginHost({
     pluginId: "rate-your-chat",
     sdk: {
       threads: {
-        get: async () => thread,
+        get: async ({ threadId }) => {
+          const found = threads[threadId];
+          if (!found)
+            throw Object.assign(new Error("Thread not found"), {
+              status: 404,
+              code: "thread_not_found",
+            });
+          return found;
+        },
         events: {
           list: async (args) => {
             if (args.afterSeq === "1") return [];
@@ -581,6 +591,282 @@ describe("archive feedback", () => {
     expect(
       bb.storage.database().prepare("SELECT archived_at FROM prompts").all(),
     ).toEqual([{ archived_at: 2000 }]);
+  });
+  describe("retros", () => {
+    type Harness = Awaited<ReturnType<typeof setup>>["harness"];
+    const fileRetro = (
+      harness: Harness,
+      params: Record<string, unknown>,
+      threadId = thread.id,
+    ) =>
+      harness.registrations.agentTools
+        .find((entry) => entry.name === "file_retro")!
+        .execute(params, {
+          threadId,
+          projectId: thread.projectId,
+          signal: new AbortController().signal,
+        });
+    const draftFor = async (harness: Harness, threadId = thread.id) =>
+      (await harness.behavior.callRpc("getDraft", { threadId })) as {
+        filedAt: number;
+      } | null;
+
+    it("registers the tool for ordinary threads and withholds it from plugin threads", async () => {
+      const { harness } = await setup();
+      expect(
+        harness.registrations.agentTools.map((entry) => entry.name),
+      ).toEqual(["file_retro"]);
+      const provider = harness.registrations.agentConfigurationProvider!;
+      expect(provider(makePluginAgentConfigurationContext()).tools).toEqual([
+        "file_retro",
+      ]);
+      expect(
+        provider(
+          makePluginAgentConfigurationContext({
+            origin: { kind: "fork", pluginId: "side-chat" },
+          }),
+        ).tools,
+      ).toEqual([]);
+    });
+
+    it("files a draft for itself and a direct child, latest draft wins", async () => {
+      const child = makeThreadResponse({
+        id: "thr_child",
+        projectId: thread.projectId,
+        providerId: "pi",
+        title: "Child chat",
+        parentThreadId: thread.id,
+        archivedAt: null,
+      });
+      const { harness } = await setup({ [child.id]: child });
+      await fileRetro(harness, {
+        score: 4,
+        useCases: ["design"],
+        note: " Self note ",
+      });
+      await fileRetro(harness, {
+        subjectThreadId: child.id,
+        score: 3,
+        useCases: ["review"],
+        note: "Child note",
+      });
+      expect(
+        await harness.behavior.callRpc("getDraft", { threadId: thread.id }),
+      ).toMatchObject({
+        subjectThreadId: thread.id,
+        subjectTitle: thread.title,
+        filedByThreadId: thread.id,
+        projectId: thread.projectId,
+        score: 4,
+        useCases: ["design"],
+        note: "Self note",
+      });
+      const listed = (await harness.behavior.callRpc("retroDrafts", {
+        offset: 0,
+      })) as {
+        total: number;
+        drafts: Array<Record<string, unknown>>;
+      };
+      expect(listed.total).toBe(2);
+      expect(listed.drafts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            subjectThreadId: child.id,
+            subjectTitle: "Child chat",
+            filedByThreadId: thread.id,
+            score: 3,
+            ratingRevision: null,
+          }),
+        ]),
+      );
+      await fileRetro(harness, {
+        subjectThreadId: child.id,
+        score: 5,
+        useCases: ["review"],
+      });
+      expect(await draftFor(harness, child.id)).toMatchObject({ score: 5 });
+    });
+
+    it("rejects a subject that is not this chat or its direct child", async () => {
+      const sibling = makeThreadResponse({
+        id: "thr_sibling",
+        projectId: thread.projectId,
+        parentThreadId: "thr_elsewhere",
+        archivedAt: null,
+      });
+      const { harness } = await setup({ [sibling.id]: sibling });
+      await expect(
+        fileRetro(harness, {
+          subjectThreadId: sibling.id,
+          score: 3,
+          useCases: ["other"],
+        }),
+      ).rejects.toThrow(/direct subthread/);
+      harness.inspection.sdk.stub("threads.get", async () => ({
+        ...thread,
+        visibility: "hidden",
+      }));
+      await expect(
+        fileRetro(harness, { score: 3, useCases: ["other"] }),
+      ).rejects.toThrow(/deleted or hidden/);
+    });
+
+    it("confirms a draft into a rating with provenance and clears the draft", async () => {
+      const { bb, harness } = await setup();
+      await fileRetro(harness, {
+        score: 3,
+        useCases: ["design"],
+        note: "Drafted note",
+      });
+      const draft = (await draftFor(harness))!;
+      const rating = await harness.behavior.callRpc("confirmDraft", {
+        subjectThreadId: thread.id,
+        expectedRevision: null,
+        draftFiledAt: draft.filedAt,
+        score: 4,
+        useCases: ["design", "review"],
+        note: "Confirmed with edits",
+      });
+      expect(rating).toMatchObject({
+        threadId: thread.id,
+        archivedAt: 1000,
+        score: 4,
+        useCases: ["design", "review"],
+        note: "Confirmed with edits",
+        draft: {
+          by: "agent",
+          draftedByThreadId: thread.id,
+          draftedAt: draft.filedAt,
+        },
+        history: {
+          observations: [{ model: "local/model-a", reasoningLevel: "high" }],
+        },
+      });
+      expect(await draftFor(harness)).toBe(null);
+      expect(
+        (
+          (await harness.behavior.callRpc("list", { offset: 0 })) as {
+            ratings: Array<Record<string, unknown>>;
+          }
+        ).ratings[0],
+      ).toMatchObject({ draft: { by: "agent" } });
+      expect(
+        bb.storage
+          .database()
+          .prepare("SELECT count(*) AS count FROM retro_drafts")
+          .get(),
+      ).toEqual({ count: 0 });
+    });
+
+    it("records a null archive time when confirming on a live chat", async () => {
+      const { harness } = await setup();
+      harness.inspection.sdk.stub("threads.get", async () => ({
+        ...thread,
+        archivedAt: null,
+      }));
+      await fileRetro(harness, { score: 4, useCases: ["coding"] });
+      const draft = (await draftFor(harness))!;
+      expect(
+        await harness.behavior.callRpc("confirmDraft", {
+          subjectThreadId: thread.id,
+          expectedRevision: null,
+          draftFiledAt: draft.filedAt,
+          score: 4,
+          useCases: ["coding"],
+          note: "",
+        }),
+      ).toMatchObject({ archivedAt: null });
+      expect(
+        await harness.behavior.callRpc("exportPage", { afterThreadId: "" }),
+      ).toMatchObject({
+        rating: { archivedAt: null, draft: { by: "agent" } },
+      });
+    });
+
+    it("claims provenance when an archive save starts from a draft", async () => {
+      const { harness } = await setup();
+      await fileRetro(harness, { score: 2, useCases: ["other"] });
+      const draft = (await draftFor(harness))!;
+      await harness.behavior.emitThreadEvent("thread.archived", { thread });
+      expect(
+        await harness.behavior.callRpc("savePrompt", {
+          ...save,
+          draftFiledAt: draft.filedAt,
+        }),
+      ).toMatchObject({
+        score: 4,
+        draft: { by: "agent", draftedAt: draft.filedAt },
+      });
+      expect(await draftFor(harness)).toBe(null);
+    });
+
+    it("refuses a discarded or stale draft confirmation", async () => {
+      const { harness } = await setup();
+      await fileRetro(harness, { score: 3, useCases: ["other"] });
+      const draft = (await draftFor(harness))!;
+      await expect(
+        harness.behavior.callRpc("confirmDraft", {
+          subjectThreadId: thread.id,
+          expectedRevision: null,
+          draftFiledAt: draft.filedAt + 1,
+          score: 3,
+          useCases: ["other"],
+          note: "",
+        }),
+      ).rejects.toThrow(/changed or was dismissed/);
+      expect(
+        await harness.behavior.callRpc("discardDraft", {
+          subjectThreadId: thread.id,
+        }),
+      ).toEqual({ removed: true });
+      expect(await draftFor(harness)).toBe(null);
+      await expect(
+        harness.behavior.callRpc("confirmDraft", {
+          subjectThreadId: thread.id,
+          expectedRevision: null,
+          draftFiledAt: draft.filedAt,
+          score: 3,
+          useCases: ["other"],
+          note: "",
+        }),
+      ).rejects.toThrow(/changed or was dismissed/);
+    });
+
+    it("clears pending drafts when their thread or rating is deleted", async () => {
+      const { harness } = await setup();
+      await fileRetro(harness, { score: 3, useCases: ["other"] });
+      await harness.behavior.emitThreadEvent("thread.deleted", {
+        thread: { ...thread, deletedAt: 2000 },
+      });
+      expect(await draftFor(harness)).toBe(null);
+      await harness.behavior.emitThreadEvent("thread.archived", { thread });
+      await harness.behavior.callRpc("savePrompt", save);
+      await fileRetro(harness, { score: 3, useCases: ["other"] });
+      await harness.behavior.callRpc("deleteRating", {
+        threadId: thread.id,
+        expectedRevision: 1,
+      });
+      expect(await draftFor(harness)).toBe(null);
+    });
+
+    it("reads legacy ratings as having no draft provenance", async () => {
+      const { bb, harness } = await setup();
+      await harness.behavior.emitThreadEvent("thread.archived", { thread });
+      const saved = (await harness.behavior.callRpc(
+        "savePrompt",
+        save,
+      )) as Record<string, unknown>;
+      expect(saved).toMatchObject({ draft: null });
+      const legacy = { ...saved };
+      delete legacy.draft;
+      bb.storage
+        .database()
+        .prepare("UPDATE ratings SET record = ? WHERE thread_id = ?")
+        .run(JSON.stringify(legacy), thread.id);
+      expect(
+        await harness.behavior.callRpc("getRating", { threadId: thread.id }),
+      ).toMatchObject({ draft: null });
+    });
   });
   it("scans only public SDK and self-contained package imports", async () => {
     const scan = await experimental_scanPublicSdkOnly(

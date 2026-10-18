@@ -2,8 +2,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
-import type { rpcContract } from "./server";
-import type { Rating } from "./model";
+import type { rpcContract, RetroDraftSummary } from "./server";
+import type { Rating, RetroDraft } from "./model";
 
 afterEach(() => {
   cleanup();
@@ -43,10 +43,17 @@ describe("archive-only UI", () => {
             count: archived ? 1 : 0,
           }),
           getRating: () => null,
+          getDraft: () => null,
+          retroDrafts: () => ({ drafts: [], total: 0 }),
+          confirmDraft: () => {
+            throw new Error("Unexpected draft confirmation");
+          },
+          discardDraft: () => ({ removed: false }),
           savePrompt: (input) => {
             saves.push(input);
             return {
               ...input,
+              draft: null,
               projectId: "proj_a",
               title: prompt.title,
               providerId: "pi",
@@ -112,11 +119,18 @@ describe("archive-only UI", () => {
             count: archived ? 1 : 0,
           }),
           getRating: () => null,
+          getDraft: () => null,
+          retroDrafts: () => ({ drafts: [], total: 0 }),
+          confirmDraft: () => {
+            throw new Error("Unexpected draft confirmation");
+          },
+          discardDraft: () => ({ removed: false }),
           savePrompt: (input) => {
             if (failSave) throw new Error("History temporarily unavailable");
             archived = false;
             return {
               ...input,
+              draft: null,
               projectId: "proj_a",
               title: prompt.title,
               providerId: "pi",
@@ -188,6 +202,7 @@ describe("archive-only UI", () => {
             count: archived ? 1 : 0,
           }),
           getRating: () => null,
+          getDraft: () => null,
         },
         realtimeConnectionState: "connected",
       },
@@ -227,6 +242,7 @@ describe("archive-only UI", () => {
             reads++;
             return { ratings: [], total: 0 };
           },
+          retroDrafts: () => ({ drafts: [], total: 0 }),
         },
         realtimeConnectionState: "connected",
       },
@@ -249,6 +265,7 @@ describe("archive-only UI", () => {
       useCases: ["debugging"],
       note: "Original note",
       archivedAt: prompt.archivedAt,
+      draft: null,
       createdAt: 1000,
       updatedAt: 1000,
       revision: 1,
@@ -337,6 +354,12 @@ describe("archive-only UI", () => {
             rating:
               records.find((record) => record.threadId > afterThreadId) ?? null,
           }),
+          retroDrafts: () => ({ drafts: [], total: 0 }),
+          getDraft: () => null,
+          confirmDraft: () => {
+            throw new Error("Unexpected draft confirmation");
+          },
+          discardDraft: () => ({ removed: false }),
         },
       },
     );
@@ -350,7 +373,7 @@ describe("archive-only UI", () => {
       reader.readAsText(downloads[0]!);
     });
     expect(JSON.parse(blobText)).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       ratings: [first, second],
     });
     expect(click).toHaveBeenCalledOnce();
@@ -378,11 +401,195 @@ describe("archive-only UI", () => {
     const slot = renderSlot(
       app.navPanels[0]!,
       { subPath: "" },
-      { rpc: { list: () => ({ ratings: [], total: 0 }) } },
+      {
+        rpc: {
+          list: () => ({ ratings: [], total: 0 }),
+          retroDrafts: () => ({ drafts: [], total: 0 }),
+        },
+      },
     );
     await slot.findByText(/No saved ratings here yet/);
     expect(slot.queryByRole("radio")).toBe(null);
     expect(slot.queryByRole("button", { name: "Rate chat" })).toBe(null);
+    slot.lifecycle.unmount();
+  });
+  it("prefills the archive dialog from an agent draft", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const draft: RetroDraft = {
+      subjectThreadId: prompt.threadId,
+      subjectTitle: prompt.title,
+      filedByThreadId: prompt.threadId,
+      projectId: "proj_a",
+      score: 3,
+      useCases: ["design"],
+      note: "Agent note",
+      filedAt: 900,
+    };
+    const saves: Array<Record<string, unknown>> = [];
+    const slot = renderSlot<{}, typeof rpcContract>(
+      app.appOverlays[0]!,
+      {},
+      {
+        rpc: {
+          pending: () => ({ prompt, count: 1 }),
+          getRating: () => null,
+          getDraft: () => draft,
+          savePrompt: (input) => {
+            saves.push(input);
+            return {
+              ...input,
+              draft: {
+                by: "agent",
+                draftedByThreadId: prompt.threadId,
+                draftedAt: draft.filedAt,
+              },
+              projectId: "proj_a",
+              title: prompt.title,
+              providerId: "pi",
+              createdAt: 1000,
+              updatedAt: 1000,
+              revision: 1,
+              history: {
+                capturedAt: 1000,
+                throughSeq: 0,
+                status: "partial",
+                warnings: [],
+                observations: [],
+              },
+            };
+          },
+          confirmDraft: () => {
+            throw new Error("Unexpected draft confirmation");
+          },
+          discardDraft: () => ({ removed: false }),
+          retroDrafts: () => ({ drafts: [], total: 0 }),
+          dismiss: () => ({ removed: true }),
+          editRating: () => {
+            throw new Error("Unexpected edit");
+          },
+          deleteRating: () => ({ removed: false }),
+          list: () => ({ ratings: [], total: 0 }),
+          exportPage: () => ({ rating: null }),
+        },
+      },
+    );
+    await slot.findByRole("dialog");
+    expect(slot.getByText(/Drafted by an agent/)).toBeTruthy();
+    expect(
+      (
+        slot.getByRole("radio", {
+          name: "3, Somewhat useful",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+    expect(
+      (slot.getByRole("checkbox", { name: "Design" }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    expect(
+      (slot.getByLabelText(/What worked/) as HTMLTextAreaElement).value,
+    ).toBe("Agent note");
+    fireEvent.click(slot.getByRole("button", { name: "Save rating" }));
+    await waitFor(() => expect(saves[0]).toMatchObject({ draftFiledAt: 900 }));
+    slot.lifecycle.unmount();
+  });
+  it("lists agent retros and confirms or discards them", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const parked: RetroDraftSummary = {
+      subjectThreadId: "thr_child",
+      subjectTitle: "Child chat",
+      filedByThreadId: prompt.threadId,
+      projectId: "proj_a",
+      score: 3,
+      useCases: ["review"],
+      note: "Child did the work",
+      filedAt: 900,
+      ratingRevision: null,
+    };
+    let drafts = [parked];
+    const confirmations: Array<Record<string, unknown>> = [];
+    let discarded: string | null = null;
+    const slot = renderSlot<{ subPath: string }, typeof rpcContract>(
+      app.navPanels[0]!,
+      { subPath: "" },
+      {
+        rpc: {
+          pending: () => ({ prompt: null, count: 0 }),
+          dismiss: () => ({ removed: false }),
+          getRating: () => null,
+          getDraft: () => null,
+          list: () => ({ ratings: [], total: 0 }),
+          retroDrafts: () => ({ drafts, total: drafts.length }),
+          confirmDraft: (input) => {
+            confirmations.push(input);
+            drafts = [];
+            return {
+              ...input,
+              threadId: input.subjectThreadId,
+              draft: {
+                by: "agent",
+                draftedByThreadId: prompt.threadId,
+                draftedAt: input.draftFiledAt,
+              },
+              projectId: "proj_a",
+              title: "Child chat",
+              providerId: "pi",
+              archivedAt: null,
+              createdAt: 1000,
+              updatedAt: 1000,
+              revision: 1,
+              history: {
+                capturedAt: 1000,
+                throughSeq: 0,
+                status: "partial",
+                warnings: [],
+                observations: [],
+              },
+            };
+          },
+          discardDraft: ({ subjectThreadId }) => {
+            discarded = subjectThreadId;
+            drafts = [];
+            return { removed: true };
+          },
+          savePrompt: () => {
+            throw new Error("Unexpected archive save");
+          },
+          editRating: () => {
+            throw new Error("Unexpected edit");
+          },
+          deleteRating: () => ({ removed: false }),
+          exportPage: () => ({ rating: null }),
+        },
+      },
+    );
+    await slot.findByText("Child chat");
+    fireEvent.click(slot.getByRole("button", { name: "Confirm" }));
+    expect(
+      (
+        slot.getByRole("radio", {
+          name: "3, Somewhat useful",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+    expect(
+      (slot.getByRole("checkbox", { name: "Review" }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    fireEvent.click(slot.getByRole("button", { name: "Save rating" }));
+    await waitFor(() =>
+      expect(confirmations[0]).toMatchObject({
+        subjectThreadId: "thr_child",
+        expectedRevision: null,
+        draftFiledAt: 900,
+      }),
+    );
+    await waitFor(() => expect(slot.queryByText("Child chat")).toBe(null));
+    drafts = [{ ...parked, filedAt: 1200 }];
+    await slot.behavior.emitRealtime("changed", null);
+    await slot.findByText("Child chat");
+    fireEvent.click(slot.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(discarded).toBe("thr_child"));
     slot.lifecycle.unmount();
   });
 });
