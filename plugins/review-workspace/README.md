@@ -78,7 +78,7 @@ The `review_workspace_tour` agent tool saves ordered sections containing narrati
 
 ## Author a tour
 
-Each step has an `id`, `title`, and ordered `blocks`. A `narrative` block contains `body`; a `diff` block contains one exact `anchor`; an `evidence` block contains an existing explanatory card shape (`call-graph`, `impact`, or `before-after`). Interleave explanation and excerpts in conceptual order, even when they cross file boundaries.
+Each step has an `id`, `title`, and ordered `blocks`. A `narrative` block contains `body`; a `diff` block contains one exact `anchor`; an `evidence` block contains an existing explanatory card shape (`call-graph`, `impact`, or `before-after`). Narrative bodies and the tour `overview` are Markdown, rendered with BB's chat-message renderer, so inline code, lists, links, and fenced blocks read as they do in the timeline. Interleave explanation and excerpts in conceptual order, even when they cross file boundaries.
 
 ```json
 {

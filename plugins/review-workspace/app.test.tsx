@@ -3185,6 +3185,64 @@ describe("Review Workspace app", () => {
     };
   };
 
+  it("renders tour notes and the overview as markdown", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const base = reviewFixture();
+    const review = {
+      ...base,
+      tour: {
+        reviewId: base.id,
+        title: "Tour",
+        overview: "Covers `lib/tours.ts` and the **anchor** validation.",
+        createdAt: 1,
+        steps: [
+          {
+            id: "one",
+            title: "One",
+            anchors: [],
+            blocks: [
+              {
+                kind: "narrative" as const,
+                body: "Push notifications were entirely `event-driven`:\n\n- `interaction.pending`\n- `thread.idle`",
+              },
+            ],
+          },
+        ],
+        coverage: {
+          totalChangedLines: 2,
+          coveredChangedLines: 2,
+          uncovered: [],
+        },
+      },
+    };
+    const slot = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "review/thread-ui" },
+      {
+        rpc: {
+          review: async () => ({ review }),
+          revisions: async () => ({ revisions: [] }),
+        } as any,
+      },
+    );
+    fireEvent.click(await slot.findByRole("button", { name: "Tour" }));
+    // Both the overview and the narrative body go through the host renderer
+    // (the test stub marks it with data-testid="bb-markdown"), so markdown in
+    // agent notes is no longer shown as literal asterisks and backticks.
+    await vi.waitFor(() => {
+      expect(slot.getAllByTestId("bb-markdown").length).toBe(2);
+    });
+    const rendered = slot
+      .getAllByTestId("bb-markdown")
+      .map((node) => node.textContent ?? "");
+    expect(rendered[0]).toContain("`lib/tours.ts`");
+    expect(rendered[1]).toContain("`event-driven`");
+    expect(
+      slot.getByText(/Push notifications were entirely `event-driven`:/),
+    ).toBeTruthy();
+    slot.lifecycle.unmount();
+  });
+
   it("states how many changed files the tour covers, and stays quiet when it covers all", async () => {
     const app = await loadPluginApp(() => import("./app"));
     // A tour that anchors 1 of 3 changed files must say so, and offer the way

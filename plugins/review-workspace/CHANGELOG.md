@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Render tour narrative notes and the tour overview as Markdown with BB's chat-message renderer, so agent notes show inline code, lists, and links instead of literal backticks.
+
 - Fix reviews of large changesets failing with `HTTP 400: Too big: expected array to have <=50 items`: environment diff-patch requests are now batched at the host's 50-path limit, so a 100-file snapshot still captures every patch.
 - Review on a phone with a bottom-sheet comment composer that shows the file and line context it is anchored to; dismissing the sheet with a typed draft keeps it anchored behind a "Resume draft" banner.
 - Keep phone chrome to three rows: the header holds the back link, title, and a `•••` menu (revision history, full screen, review target), the mode row holds Files/Tour plus the line wrap and unified/split layout toggles, and one document toolbar row holds prev/next, the changed-file sheet trigger, More, and Viewed & next.

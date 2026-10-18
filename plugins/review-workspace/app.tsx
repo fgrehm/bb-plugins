@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import {
+  Markdown,
   definePluginApp,
   experimental_usePluginId,
   useBbNavigate,
@@ -3996,9 +3997,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
       <div className="mx-auto max-w-5xl">
         <h2 className="text-lg font-semibold">{tour.title}</h2>
         {tour.overview ? (
-          <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">
-            {tour.overview}
-          </p>
+          <Markdown
+            content={tour.overview}
+            className="mt-2 text-sm text-muted-foreground"
+          />
         ) : null}
         <p className="my-3 text-[11px] text-muted-foreground">
           Agent-authored, not runtime-verified · reading does not mark files
@@ -4109,12 +4111,14 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             {step.blocks.map((block, index) => {
               if (block.kind === "narrative")
                 return (
-                  <p
+                  // Agent-authored notes are markdown, rendered with the host's
+                  // chat-message renderer so they read like the rest of BB
+                  // (inline code, lists, links, fenced blocks).
+                  <Markdown
                     key={index}
-                    className="my-4 whitespace-pre-wrap text-sm leading-relaxed"
-                  >
-                    {block.body}
-                  </p>
+                    content={block.body}
+                    className="my-4 text-sm leading-relaxed"
+                  />
                 );
               if (block.kind === "evidence")
                 return (
