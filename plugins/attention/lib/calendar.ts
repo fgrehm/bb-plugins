@@ -75,3 +75,35 @@ export function dayLabel(day: string): string {
     new Date(Date.UTC(year ?? 1970, (month ?? 1) - 1, dayOfMonth ?? 1)),
   );
 }
+
+export function addDays(day: string, delta: number): string {
+  const [year, month, dayOfMonth] = day.split("-").map(Number);
+  const next = new Date(
+    Date.UTC(year ?? 1970, (month ?? 1) - 1, (dayOfMonth ?? 1) + delta),
+  );
+  return `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(
+    next.getUTCDate(),
+  )}`;
+}
+
+export function weekRange(day: string): { startDay: string; endDay: string } {
+  const [year, month, dayOfMonth] = day.split("-").map(Number);
+  const weekday =
+    (new Date(
+      Date.UTC(year ?? 1970, (month ?? 1) - 1, dayOfMonth ?? 1),
+    ).getUTCDay() +
+      6) %
+    7;
+  const startDay = addDays(day, -weekday);
+  return { startDay, endDay: addDays(startDay, 6) };
+}
+
+export function monthRange(day: string): { startDay: string; endDay: string } {
+  const month = monthOf(day);
+  const [year, monthNumber] = month.split("-").map(Number);
+  const last = new Date(Date.UTC(year ?? 1970, monthNumber ?? 1, 0));
+  return {
+    startDay: `${month}-01`,
+    endDay: `${month}-${pad(last.getUTCDate())}`,
+  };
+}

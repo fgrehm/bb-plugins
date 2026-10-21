@@ -26,6 +26,9 @@ score productivity, attention, or cognitive load.
   busiest threads, each with a miniature timeline.
 - **Agent requests**: every structured ask from an agent, with thread, wait,
   and outcome. Collapsed until you open it.
+- **Week and Month reports**: switch the view to get a daily heatmap, a daily
+  agent/input rhythm, the busiest days, and the top threads for the range.
+  Click any day in the heatmap to jump to its timeline.
 
 Click a thread name or card to open it.
 
@@ -41,6 +44,17 @@ The plugin reads BB's own thread history through the public SDK:
 It does not read message bodies, tool arguments, or tool output. It writes
 nothing to BB, opens no network connection, and sends nothing anywhere. All
 data stays in the BB server and is computed on demand.
+
+## Caching
+
+Day and range reports are cached in the plugin server's memory for five
+minutes, and in the page for the current session. Past days and past ranges are
+cached; today and any range that includes today are recomputed so new work
+shows up. **Refresh** clears the page caches and tells the server to bypass its
+cache. The calendar's availability is cached separately.
+
+Ranges are limited to 62 days. Range thread lists show the top 12 by agent
+time; the day view remains the place for full per-thread and per-request detail.
 
 ## Limits worth knowing
 

@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  addDays,
   dayKey,
   dayLabel,
   monthGrid,
   monthOf,
+  monthRange,
   monthTitle,
   shiftMonth,
+  weekRange,
 } from "./calendar.js";
 
 describe("calendar helpers", () => {
@@ -26,6 +29,18 @@ describe("calendar helpers", () => {
     expect(february).toHaveLength(35);
     expect(february[6]).toBe("2026-02-01");
     expect(february[33]).toBe("2026-02-28");
+  });
+
+  it("computes week and month ranges", () => {
+    expect(addDays("2026-10-31", 1)).toBe("2026-11-01");
+    expect(weekRange("2026-10-15")).toEqual({
+      startDay: "2026-10-12",
+      endDay: "2026-10-18",
+    });
+    expect(monthRange("2026-10-15")).toEqual({
+      startDay: "2026-10-01",
+      endDay: "2026-10-31",
+    });
   });
 
   it("formats month, day, and titles", () => {

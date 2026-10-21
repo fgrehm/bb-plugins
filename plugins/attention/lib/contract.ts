@@ -114,8 +114,46 @@ export const readDayInputSchema = z.object({
   timezone: z.string().min(1).max(64),
   projectId: z.string().min(1).optional(),
   includeHidden: z.boolean().optional(),
+  fresh: z.boolean().optional(),
 });
 export type ReadDayInput = z.infer<typeof readDayInputSchema>;
+
+export const rangeDaySchema = z.object({
+  day: z.string(),
+  summary: daySummarySchema,
+});
+export type RangeDay = z.infer<typeof rangeDaySchema>;
+
+export const rangeThreadSchema = z.object({
+  thread: dayThreadSchema,
+  agentMs: z.number(),
+  turns: z.number().int(),
+  inputs: z.number().int(),
+  questions: z.number().int(),
+});
+export type RangeThread = z.infer<typeof rangeThreadSchema>;
+
+export const rangeReportSchema = z.object({
+  startDay: z.string(),
+  endDay: z.string(),
+  timezone: z.string(),
+  generatedAt: z.number(),
+  days: z.array(rangeDaySchema),
+  totals: daySummarySchema,
+  threads: z.array(rangeThreadSchema),
+  coverage: dayCoverageSchema,
+});
+export type RangeReport = z.infer<typeof rangeReportSchema>;
+
+export const readRangeInputSchema = z.object({
+  startDay: DAY_INPUT,
+  endDay: DAY_INPUT,
+  timezone: z.string().min(1).max(64),
+  projectId: z.string().min(1).optional(),
+  includeHidden: z.boolean().optional(),
+  fresh: z.boolean().optional(),
+});
+export type ReadRangeInput = z.infer<typeof readRangeInputSchema>;
 
 export const listDaysInputSchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, "Expected YYYY-MM"),
@@ -136,5 +174,9 @@ export const rpcContract = defineRpcContract({
   list_days: {
     input: listDaysInputSchema,
     output: listDaysResultSchema,
+  },
+  read_range: {
+    input: readRangeInputSchema,
+    output: rangeReportSchema,
   },
 });

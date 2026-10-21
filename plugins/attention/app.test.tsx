@@ -4,6 +4,7 @@ import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type { rpcContract } from "./lib/contract";
 import { buildReport, type RawEvent } from "./lib/day";
+import { weekRange } from "./lib/calendar";
 import type { DayThread } from "./lib/contract";
 
 afterEach(cleanup);
@@ -77,6 +78,18 @@ const report = buildReport({
   truncatedThreads: [],
 });
 
+const week = weekRange(DAY);
+const range = {
+  startDay: week.startDay,
+  endDay: week.endDay,
+  timezone: "UTC",
+  generatedAt: 0,
+  days: [{ day: DAY, summary: report.summary }],
+  totals: report.summary,
+  threads: [],
+  coverage: report.coverage,
+};
+
 describe("attention panel", () => {
   it("renders the day summary, timeline row, and question", async () => {
     const app = await loadPluginApp(() => import("./app"));
@@ -87,7 +100,13 @@ describe("attention panel", () => {
     const slot = renderSlot<{ subPath: string }, typeof rpcContract>(
       panel,
       { subPath: "" },
-      { rpc: { read_day: () => report, list_days: () => ({ days: [DAY] }) } },
+      {
+        rpc: {
+          read_day: () => report,
+          list_days: () => ({ days: [DAY] }),
+          read_range: () => range,
+        },
+      },
     );
 
     await waitFor(() =>
@@ -120,6 +139,15 @@ describe("attention panel", () => {
       "read_day",
     );
 
+    fireEvent.click(slot.getByText("Week"));
+    await waitFor(() =>
+      expect(slot.queryByText("Days in this range")).not.toBe(null),
+    );
+    expect(slot.inspection.rpcCalls.map((call) => call.method)).toContain(
+      "read_range",
+    );
+    expect(slot.getByLabelText("Open Tue, 20 Oct 2026")).toBeTruthy();
+
     slot.lifecycle.unmount();
   });
 
@@ -135,7 +163,13 @@ describe("attention panel", () => {
     const slot = renderSlot<{ subPath: string }, typeof rpcContract>(
       app.navPanels[0]!,
       { subPath: "" },
-      { rpc: { read_day: () => empty, list_days: () => ({ days: [] }) } },
+      {
+        rpc: {
+          read_day: () => empty,
+          list_days: () => ({ days: [] }),
+          read_range: () => ({ ...range, days: [], totals: empty.summary }),
+        },
+      },
     );
     await waitFor(() =>
       expect(

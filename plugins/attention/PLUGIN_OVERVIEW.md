@@ -16,6 +16,8 @@ you stepped in, and when an agent was waiting for your answer.
 - **Thread cards** for the busiest eight, each with a miniature timeline and
   agent time, turns, inputs, and requests.
 - **Agent requests** with thread, wait, and outcome, collapsed until opened.
+- **Week and Month views** with a daily heatmap, daily rhythm, busiest days, and
+  top threads; click a day to open its timeline.
 - Failed and interrupted turns, archived threads, and automated inputs are
   marked rather than blended in.
 
@@ -38,3 +40,9 @@ BB records no reading or focus, so thread switches are changes between your
 recorded inputs, not changes in attention. Only structured agent requests, including approvals, are
 shown. Queued messages are timed at dispatch, and per-turn token history is not
 retained. Archived threads are included; deleted threads are gone.
+
+## Caching and limits
+
+Day and range reports are cached in the plugin server for five minutes and in
+the page for the session. Today and ranges that include today are recomputed.
+Refresh bypasses both caches. Ranges are limited to 62 days.

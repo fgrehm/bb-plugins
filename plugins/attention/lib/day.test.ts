@@ -183,6 +183,42 @@ describe("buildReport", () => {
     expect(timedOut?.waitMs).toBe(10 * 60_000);
   });
 
+  it("does not extend an unfinished turn into a future day", () => {
+    const unfinished: RawEvent[] = [
+      start("thr_a", "open", at(9) - 24 * 3_600_000),
+    ];
+    const future = buildReport({
+      day: DAY,
+      timezone: "UTC",
+      threads: [A],
+      events: unfinished,
+      truncatedThreads: [],
+      window: {
+        start: at(0) + 24 * 3_600_000,
+        end: at(0) + 48 * 3_600_000,
+      },
+      now: at(12),
+      includeBins: false,
+    });
+    expect(future.turns).toHaveLength(0);
+  });
+
+  it("stops an unfinished turn at now on the current day", () => {
+    const open: RawEvent[] = [start("thr_a", "open", at(9))];
+    const current = buildReport({
+      day: DAY,
+      timezone: "UTC",
+      threads: [A],
+      events: open,
+      truncatedThreads: [],
+      now: at(10),
+      includeBins: false,
+    });
+    expect(current.turns).toHaveLength(1);
+    expect(current.turns[0]?.end).toBe(at(10));
+    expect(current.turns[0]?.status).toBe("running");
+  });
+
   it("clips a turn that started the day before", () => {
     const clipped = report.turns.find((candidate) => candidate.turnId === "t0");
     expect(clipped?.start).toBe(Date.parse(`${DAY}T00:00:00.000Z`));

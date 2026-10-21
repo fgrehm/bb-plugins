@@ -3,7 +3,9 @@ import { buildReport, type RawEvent } from "./day.js";
 import {
   busiestWindows,
   dayNarrative,
+  activeDays,
   hourlyBuckets,
+  rangeNarrative,
   threadOrder,
   threadSummaries,
 } from "./insights.js";
@@ -212,5 +214,25 @@ describe("thread order", () => {
     expect(order[0]?.descendants).toBe(1);
     expect(order[0]?.descendantAgentMs).toBe(5 * 60_000);
     expect(order[2]?.detached).toBe(true);
+  });
+});
+
+describe("range summary", () => {
+  it("counts active days and states totals", () => {
+    const range = {
+      startDay: DAY,
+      endDay: DAY,
+      timezone: "UTC",
+      generatedAt: 0,
+      days: [{ day: DAY, summary: report.summary }],
+      totals: report.summary,
+      threads: [],
+      coverage: report.coverage,
+    };
+    expect(activeDays(range)).toBe(1);
+    const text = rangeNarrative(range);
+    expect(text).toContain("Across 1 active day");
+    expect(text).toContain("You sent 2 inputs");
+    expect(text).toContain("1 day had two or more turns running");
   });
 });

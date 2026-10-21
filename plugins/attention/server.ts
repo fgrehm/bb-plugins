@@ -5,7 +5,9 @@ import {
   type DayThread,
   type ListDaysInput,
   type ListDaysResult,
+  type RangeReport,
   type ReadDayInput,
+  type ReadRangeInput,
 } from "./lib/contract.js";
 import {
   buildReport,
@@ -14,6 +16,7 @@ import {
   isValidTimeZone,
   type RawEvent,
 } from "./lib/day.js";
+import { threadSummaries } from "./lib/insights.js";
 
 const EVENT_TYPES = [
   "client/turn/requested",
@@ -30,8 +33,44 @@ const THREAD_LIST_LIMIT = 500;
 const MAX_DAY_SCAN_PAGES = 8;
 const DAY_SCAN_CONCURRENCY = 6;
 const DAYS_CACHE_TTL_MS = 5 * 60_000;
+const REPORT_CACHE_TTL_MS = 5 * 60_000;
+const REPORT_CACHE_MAX = 40;
+const MAX_RANGE_DAYS = 62;
+const MAX_RANGE_THREADS = 250;
+const RANGE_EVENT_PAGES = 30;
 
 const daysCache = new Map<string, { at: number; days: string[] }>();
+const reportCache = new Map<string, { at: number; value: DayReport }>();
+const rangeCache = new Map<string, { at: number; value: RangeReport }>();
+
+function cached<T>(
+  store: Map<string, { at: number; value: T }>,
+  key: string,
+  enabled: boolean,
+): T | undefined {
+  if (!enabled) return undefined;
+  const entry = store.get(key);
+  if (entry === undefined) return undefined;
+  if (Date.now() - entry.at >= REPORT_CACHE_TTL_MS) {
+    store.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+function remember<T>(
+  store: Map<string, { at: number; value: T }>,
+  key: string,
+  value: T,
+  enabled: boolean,
+): void {
+  if (!enabled) return;
+  if (store.size >= REPORT_CACHE_MAX) {
+    const oldest = store.keys().next().value;
+    if (oldest !== undefined) store.delete(oldest);
+  }
+  store.set(key, { at: Date.now(), value });
+}
 
 type ThreadRow = Awaited<
   ReturnType<BbPluginApi["sdk"]["threads"]["list"]>
@@ -145,11 +184,12 @@ function mapRow(row: EventRow): RawEvent | null {
 async function readThreadEvents(
   bb: BbPluginApi,
   threadId: string,
-  dayStart: number,
+  rangeStart: number,
+  maxPages = MAX_PAGES_PER_THREAD,
 ): Promise<{ events: RawEvent[]; truncated: boolean }> {
   const seen = new Map<string, RawEvent>();
   let beforeSeq: string | undefined;
-  for (let page = 0; page < MAX_PAGES_PER_THREAD; page += 1) {
+  for (let page = 0; page < maxPages; page += 1) {
     const rows = await bb.sdk.threads.events.list({
       threadId,
       types: EVENT_TYPES,
@@ -166,7 +206,7 @@ async function readThreadEvents(
       if (mapped !== null) seen.set(row.id, mapped);
       if (oldest === undefined || row.seq < oldest.seq) oldest = row;
     }
-    if (oldest === undefined || oldest.createdAt < dayStart) {
+    if (oldest === undefined || oldest.createdAt < rangeStart) {
       return { events: [...seen.values()], truncated: false };
     }
     if (rows.length < PAGE_SIZE) {
@@ -177,7 +217,7 @@ async function readThreadEvents(
   return { events: [...seen.values()], truncated: true };
 }
 
-async function readDay(
+async function computeDay(
   bb: BbPluginApi,
   input: ReadDayInput,
 ): Promise<DayReport> {
@@ -319,12 +359,169 @@ async function listDays(
   return { days: sorted };
 }
 
+async function readDay(
+  bb: BbPluginApi,
+  input: ReadDayInput,
+): Promise<DayReport> {
+  const timezone = isValidTimeZone(input.timezone) ? input.timezone : "UTC";
+  const today = dayStringAt(Date.now(), timezone);
+  const cacheable = !input.fresh && input.day !== today;
+  const key = [
+    timezone,
+    input.day,
+    input.projectId ?? "",
+    input.includeHidden === false ? "0" : "1",
+  ].join("|");
+  const hit = cached(reportCache, key, cacheable);
+  if (hit !== undefined) return hit;
+  const report = await computeDay(bb, { ...input, timezone });
+  remember(reportCache, key, report, cacheable);
+  return report;
+}
+
+function nextDay(day: string): string {
+  const next = new Date(Date.parse(`${day}T00:00:00.000Z`) + 86_400_000);
+  return next.toISOString().slice(0, 10);
+}
+
+function enumerateDays(startDay: string, endDay: string): string[] {
+  const days: string[] = [];
+  let current = startDay;
+  while (current <= endDay && days.length < MAX_RANGE_DAYS + 1) {
+    days.push(current);
+    current = nextDay(current);
+  }
+  return days;
+}
+
+async function computeRange(
+  bb: BbPluginApi,
+  input: ReadRangeInput,
+): Promise<RangeReport> {
+  const timezone = isValidTimeZone(input.timezone) ? input.timezone : "UTC";
+  if (input.startDay > input.endDay) {
+    throw new Error("The range start must not be after its end");
+  }
+  const days = enumerateDays(input.startDay, input.endDay);
+  if (days.length > MAX_RANGE_DAYS) {
+    throw new Error(`Ranges are limited to ${MAX_RANGE_DAYS} days`);
+  }
+  const { start } = dayBounds(input.startDay, timezone);
+  const { start: end } = dayBounds(nextDay(input.endDay), timezone);
+
+  const listed = await bb.sdk.threads.list({
+    includeHidden: input.includeHidden ?? true,
+    limit: THREAD_LIST_LIMIT,
+    ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+  });
+  const candidates = listed
+    .filter(
+      (thread) =>
+        thread.deletedAt === null &&
+        thread.createdAt < end &&
+        thread.updatedAt >= start,
+    )
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, MAX_RANGE_THREADS);
+
+  const truncatedThreads: string[] = [];
+  const events: RawEvent[] = [];
+  for (const thread of candidates) {
+    const result = await readThreadEvents(
+      bb,
+      thread.id,
+      start,
+      RANGE_EVENT_PAGES,
+    );
+    if (result.truncated) truncatedThreads.push(thread.id);
+    events.push(...result.events);
+  }
+
+  const threadRows = candidates.map(toDayThread);
+  const dayReports = days.map((day) =>
+    buildReport({
+      day,
+      timezone,
+      threads: threadRows,
+      events,
+      truncatedThreads,
+      includeBins: false,
+    }),
+  );
+  const totalsReport = buildReport({
+    day: input.startDay,
+    timezone,
+    threads: threadRows,
+    events,
+    truncatedThreads,
+    window: { start, end },
+    includeBins: false,
+  });
+
+  const byId = new Map(threadRows.map((thread) => [thread.id, thread]));
+  const threads = threadSummaries(totalsReport)
+    .slice(0, 12)
+    .flatMap((summary) => {
+      const thread = byId.get(summary.id);
+      if (thread === undefined) return [];
+      return [
+        {
+          thread,
+          agentMs: summary.agentMs,
+          turns: summary.turns,
+          inputs: summary.inputs,
+          questions: summary.questions,
+        },
+      ];
+    });
+
+  return {
+    startDay: input.startDay,
+    endDay: input.endDay,
+    timezone,
+    generatedAt: Date.now(),
+    days: dayReports.map((report, index) => ({
+      day: days[index] ?? input.startDay,
+      summary: report.summary,
+    })),
+    totals: totalsReport.summary,
+    threads,
+    coverage: {
+      threadsScanned: candidates.length,
+      eventsRead: events.length,
+      truncatedThreads,
+    },
+  };
+}
+
+async function readRange(
+  bb: BbPluginApi,
+  input: ReadRangeInput,
+): Promise<RangeReport> {
+  const timezone = isValidTimeZone(input.timezone) ? input.timezone : "UTC";
+  const today = dayStringAt(Date.now(), timezone);
+  const cacheable = !input.fresh && input.endDay < today;
+  const key = [
+    timezone,
+    input.startDay,
+    input.endDay,
+    input.projectId ?? "",
+    input.includeHidden === false ? "0" : "1",
+  ].join("|");
+  const hit = cached(rangeCache, key, cacheable);
+  if (hit !== undefined) return hit;
+  const report = await computeRange(bb, { ...input, timezone });
+  remember(rangeCache, key, report, cacheable);
+  return report;
+}
+
 export default async function plugin(bb: BbPluginApi) {
   bb.log.info("attention: loaded");
 
   bb.rpc.register(rpcContract, {
     read_day: (input) => readDay(bb, input),
     list_days: (input) => listDays(bb, input),
+    read_range: (input) => readRange(bb, input),
   });
 
   bb.onDispose(() => {

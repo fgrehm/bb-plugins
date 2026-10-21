@@ -53,6 +53,9 @@ export interface BuildReportArgs {
   threads: DayThread[];
   events: RawEvent[];
   truncatedThreads: string[];
+  window?: { start: number; end: number };
+  includeBins?: boolean;
+  now?: number;
 }
 
 const MINUTE = 60_000;
@@ -161,7 +164,9 @@ function turnStatus(value: string): DayTurn["status"] {
 
 export function buildReport(args: BuildReportArgs): DayReport {
   const { day, timezone, threads, events } = args;
-  const { start: dayStart, end: dayEnd } = dayBounds(day, timezone);
+  const { start: dayStart, end: dayEnd } =
+    args.window ?? dayBounds(day, timezone);
+  const now = args.now ?? Date.now();
 
   const acceptedByRequest = new Map<string, { turnId: string; at: number }>();
   for (const event of events) {
@@ -217,7 +222,7 @@ export function buildReport(args: BuildReportArgs): DayReport {
     const threadId = turnKey.slice(0, separator);
     const turnId = turnKey.slice(separator + 1);
     const end = turnEnds.get(turnKey);
-    const endAt = end?.at ?? dayEnd;
+    const endAt = end?.at ?? Math.min(now, dayEnd);
     if (endAt <= dayStart || start >= dayEnd) continue;
     const request = requestByTurn.get(turnKey);
     turns.push({
@@ -399,11 +404,14 @@ export function buildReport(args: BuildReportArgs): DayReport {
       busyMinutes: concurrency.filter((count) => count >= 2).length,
       threadTransitions,
     },
-    bins: {
-      binMs: MINUTE,
-      concurrency,
-      humanInputs: inputBins,
-    },
+    bins:
+      args.includeBins === false
+        ? { binMs: MINUTE, concurrency: [], humanInputs: [] }
+        : {
+            binMs: MINUTE,
+            concurrency,
+            humanInputs: inputBins,
+          },
     coverage: {
       threadsScanned: threads.length,
       eventsRead: events.length,

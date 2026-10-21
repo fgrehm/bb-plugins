@@ -1,4 +1,4 @@
-import type { DayReport } from "./contract.js";
+import type { DayReport, RangeReport } from "./contract.js";
 
 export interface HourBucket {
   start: number;
@@ -275,4 +275,47 @@ function formatMinutes(minutes: number): string {
   const hours = Math.floor(minutes / 60);
   const rest = Math.round(minutes % 60);
   return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
+}
+
+export function activeDays(report: RangeReport): number {
+  return report.days.filter(
+    (entry) =>
+      entry.summary.turns > 0 ||
+      entry.summary.humanInputs > 0 ||
+      entry.summary.questions > 0,
+  ).length;
+}
+
+export function rangeNarrative(report: RangeReport): string {
+  const active = activeDays(report);
+  if (active === 0) {
+    return "No agent activity or human input recorded in this range.";
+  }
+  const totals = report.totals;
+  const parts = [
+    `Across ${active} active ${active === 1 ? "day" : "days"}, agents ran for ${formatMinutes(
+      totals.turnMinutes,
+    )} on ${totals.threadsActive} ${
+      totals.threadsActive === 1 ? "thread" : "threads"
+    }.`,
+    `You sent ${totals.humanInputs} ${
+      totals.humanInputs === 1 ? "input" : "inputs"
+    }.`,
+    (() => {
+      const busy = report.days.filter(
+        (entry) => entry.summary.busyMinutes > 0,
+      ).length;
+      return `${busy} ${busy === 1 ? "day had" : "days had"} two or more turns running.`;
+    })(),
+  ];
+  if (totals.questions > 0) {
+    parts.push(
+      `Agents made ${totals.questions} ${
+        totals.questions === 1 ? "request" : "requests"
+      } for input; ${totals.answeredQuestions} ${
+        totals.answeredQuestions === 1 ? "was" : "were"
+      } resolved.`,
+    );
+  }
+  return parts.join(" ");
 }

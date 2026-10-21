@@ -1,20 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { definePluginApp, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
-import type { DayReport, DayThread } from "./lib/contract";
+import type { DayReport, DayThread, RangeReport } from "./lib/contract";
 import type { rpcContract } from "./lib/contract";
 import { dayStringAt, previousDay } from "./lib/day";
 import {
+  addDays,
   dayLabel,
   monthGrid,
   monthOf,
+  monthRange,
   monthTitle,
   shiftMonth,
+  weekRange,
   weekdayLabels,
 } from "./lib/calendar.js";
 import {
+  activeDays,
   busiestWindows,
   dayNarrative,
   hourlyBuckets,
+  rangeNarrative,
   threadOrder,
   threadSummaries,
 } from "./lib/insights";
@@ -37,6 +42,14 @@ const FALLBACK_TIMEZONES = [
 ];
 
 const MINUTE = 60_000;
+
+function remember<T>(map: Map<string, T>, key: string, value: T, max: number) {
+  if (map.size >= max) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+  map.set(key, value);
+}
 
 function timezoneOptions(): string[] {
   try {
@@ -815,10 +828,12 @@ function Questions({ report }: { report: DayReport }) {
 function DayPicker({
   value,
   timezone,
+  resetToken,
   onChange,
 }: {
   value: string;
   timezone: string;
+  resetToken: number;
   onChange: (day: string) => void;
 }) {
   const rpc = useRpc<typeof rpcContract>();
@@ -834,6 +849,10 @@ function DayPicker({
   useEffect(() => {
     if (!open) setMonth(monthOf(value));
   }, [open, value]);
+
+  useEffect(() => {
+    if (resetToken > 0) cache.current.clear();
+  }, [resetToken]);
 
   useEffect(() => {
     if (!open) return;
@@ -860,7 +879,7 @@ function DayPicker({
     return () => {
       cancelled = true;
     };
-  }, [open, month, timezone, rpc]);
+  }, [open, month, timezone, rpc, resetToken]);
 
   useEffect(() => {
     if (!open) return;
@@ -982,14 +1001,404 @@ function DayPicker({
   );
 }
 
+function weekLabel(startDay: string, endDay: string): string {
+  const start = new Date(`${startDay}T12:00:00.000Z`);
+  const end = new Date(`${endDay}T12:00:00.000Z`);
+  const sameMonth = startDay.slice(0, 7) === endDay.slice(0, 7);
+  const startText = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    ...(sameMonth ? {} : { month: "short" }),
+  }).format(start);
+  const endText = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(end);
+  return `${startText}–${endText}`;
+}
+
+function RangeHeatmap({
+  range,
+  mode,
+  selectedDay,
+  onOpenDay,
+}: {
+  range: RangeReport;
+  mode: "week" | "month";
+  selectedDay: string;
+  onOpenDay: (day: string) => void;
+}) {
+  const byDay = useMemo(
+    () => new Map(range.days.map((entry) => [entry.day, entry.summary])),
+    [range],
+  );
+  const maxAgent = Math.max(
+    1,
+    ...range.days.map((entry) => entry.summary.turnMinutes),
+  );
+  const cells =
+    mode === "month"
+      ? monthGrid(monthOf(range.startDay))
+      : Array.from({ length: 7 }, (_, index) => addDays(range.startDay, index));
+  const cellHeight = mode === "week" ? "h-24" : "h-16";
+  return (
+    <div>
+      <div className="grid grid-cols-7 text-center text-xs text-muted-foreground">
+        {weekdayLabels().map((weekday) => (
+          <span key={weekday} className="py-1">
+            {weekday.slice(0, 2)}
+          </span>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((day, index) => {
+          if (day === null) return <span key={`blank-${index}`} />;
+          const summary = byDay.get(day);
+          const inRange = day >= range.startDay && day <= range.endDay;
+          if (!inRange) {
+            return <span key={day} className={cn(cellHeight, "rounded-md")} />;
+          }
+          const active =
+            summary !== undefined &&
+            (summary.turns > 0 ||
+              summary.humanInputs > 0 ||
+              summary.questions > 0);
+          const agent = summary?.turnMinutes ?? 0;
+          const inputs = summary?.humanInputs ?? 0;
+          return (
+            <button
+              key={day}
+              type="button"
+              disabled={!active}
+              onClick={() => onOpenDay(day)}
+              title={`${dayLabel(day)} · ${agent.toFixed(
+                0,
+              )} agent-min · ${inputs} ${inputs === 1 ? "input" : "inputs"}`}
+              aria-label={`Open ${dayLabel(day)}`}
+              className={cn(
+                "relative flex flex-col items-center justify-end gap-1 rounded-md border p-1 transition-colors",
+                cellHeight,
+                day === selectedDay ? "border-primary" : "border-border",
+                active ? "hover:bg-accent" : "cursor-not-allowed opacity-30",
+              )}
+            >
+              <span className="absolute left-1.5 top-1 text-xs tabular-nums">
+                {Number(day.slice(8))}
+              </span>
+              {active ? (
+                <span
+                  className="w-full rounded-sm"
+                  style={{
+                    height: `${Math.max(6, (agent / maxAgent) * 64)}%`,
+                    background:
+                      "color-mix(in oklab, var(--success) 55%, transparent)",
+                  }}
+                />
+              ) : null}
+              {inputs > 0 ? (
+                <span
+                  className="absolute right-1.5 top-1.5 size-1.5 rounded-full"
+                  style={{ background: "var(--attention)" }}
+                />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Click a day to open its timeline. Bars are agent minutes; dots are your
+        inputs.
+      </p>
+    </div>
+  );
+}
+
+function RangeTrend({ range }: { range: RangeReport }) {
+  const maxAgent = Math.max(
+    1,
+    ...range.days.map((entry) => entry.summary.turnMinutes),
+  );
+  const maxInputs = Math.max(
+    1,
+    ...range.days.map((entry) => entry.summary.humanInputs),
+  );
+  const step = Math.max(1, Math.ceil(range.days.length / 9));
+  return (
+    <div>
+      <div className="flex h-24 items-end gap-1" aria-hidden="true">
+        {range.days.map((entry) => (
+          <div
+            key={entry.day}
+            className="flex h-full flex-1 flex-col justify-end"
+            title={`${entry.day} · ${entry.summary.turnMinutes.toFixed(
+              0,
+            )} agent-min`}
+          >
+            <div
+              className="w-full rounded-t-[2px]"
+              style={{
+                height: `${(entry.summary.turnMinutes / maxAgent) * 100}%`,
+                background:
+                  entry.summary.turnMinutes === 0
+                    ? "var(--muted)"
+                    : "color-mix(in oklab, var(--success) 55%, transparent)",
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="mt-1 flex h-10 items-end gap-1" aria-hidden="true">
+        {range.days.map((entry) => (
+          <div
+            key={entry.day}
+            className="flex h-full flex-1 flex-col justify-end"
+            title={`${entry.day} · ${entry.summary.humanInputs} inputs`}
+          >
+            <div
+              className="w-full rounded-t-[2px]"
+              style={{
+                height: `${(entry.summary.humanInputs / maxInputs) * 100}%`,
+                background:
+                  entry.summary.humanInputs === 0
+                    ? "transparent"
+                    : "var(--attention)",
+              }}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="relative mt-1 h-4 text-xs text-muted-foreground">
+        {range.days.map((entry, index) =>
+          index % step === 0 ? (
+            <span
+              key={entry.day}
+              className="absolute tabular-nums"
+              style={{
+                left: `${((index + 0.5) / range.days.length) * 100}%`,
+                transform: "translateX(-50%)",
+              }}
+            >
+              {Number(entry.day.slice(8))}
+            </span>
+          ) : null,
+        )}
+      </div>
+      <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+        <span>agent-minutes per day, then your inputs per day</span>
+        <span>
+          peak {maxAgent.toFixed(0)} agent-min · {maxInputs} inputs
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function RangeBusiestDays({
+  range,
+  onOpenDay,
+}: {
+  range: RangeReport;
+  onOpenDay: (day: string) => void;
+}) {
+  const days = useMemo(
+    () =>
+      [...range.days]
+        .filter(
+          (entry) =>
+            entry.summary.humanInputs > 0 || entry.summary.turnMinutes > 0,
+        )
+        .sort(
+          (a, b) =>
+            b.summary.humanInputs - a.summary.humanInputs ||
+            b.summary.turnMinutes - a.summary.turnMinutes,
+        )
+        .slice(0, 3)
+        .sort((a, b) => a.day.localeCompare(b.day)),
+    [range],
+  );
+  const maxInputs = Math.max(
+    1,
+    ...days.map((entry) => entry.summary.humanInputs),
+  );
+  if (days.length === 0) {
+    return <p className="text-sm text-muted-foreground">No busy days.</p>;
+  }
+  return (
+    <div className="space-y-2">
+      {days.map((entry) => (
+        <button
+          key={entry.day}
+          type="button"
+          onClick={() => onOpenDay(entry.day)}
+          className="w-full text-left"
+        >
+          <div className="flex items-baseline justify-between gap-2 text-xs">
+            <span className="font-medium tabular-nums">
+              {dayLabel(entry.day)}
+            </span>
+            <span className="text-muted-foreground">
+              {entry.summary.humanInputs} inputs ·{" "}
+              {entry.summary.turnMinutes.toFixed(0)} agent-min
+            </span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${(entry.summary.humanInputs / maxInputs) * 100}%`,
+                background: "var(--attention)",
+              }}
+            />
+          </div>
+        </button>
+      ))}
+      <p className="pt-1 text-xs text-muted-foreground">
+        Ranked by your recorded inputs, then agent minutes.
+      </p>
+    </div>
+  );
+}
+
+function RangeThreads({ range }: { range: RangeReport }) {
+  const navigate = useBbNavigate();
+  const maxAgent = Math.max(1, ...range.threads.map((entry) => entry.agentMs));
+  return (
+    <div className="space-y-2">
+      {range.threads.map((entry) => (
+        <button
+          key={entry.thread.id}
+          type="button"
+          onClick={() => navigate.toThread(entry.thread.id)}
+          title={entry.thread.title}
+          className="w-full text-left"
+        >
+          <div className="flex items-baseline justify-between gap-3 text-xs">
+            <span className="flex min-w-0 items-center gap-1">
+              {entry.thread.archived ? (
+                <Icon
+                  name="Archive"
+                  className="size-3 shrink-0 text-muted-foreground"
+                />
+              ) : null}
+              <span className="truncate">{entry.thread.title}</span>
+            </span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              {duration(entry.agentMs)} · {entry.turns} turns · {entry.inputs}{" "}
+              inputs
+            </span>
+          </div>
+          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: `${(entry.agentMs / maxAgent) * 100}%`,
+                background:
+                  "color-mix(in oklab, var(--success) 55%, transparent)",
+              }}
+            />
+          </div>
+        </button>
+      ))}
+      {range.threads.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No threads in this range.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function RangeView({
+  range,
+  mode,
+  selectedDay,
+  onOpenDay,
+}: {
+  range: RangeReport;
+  mode: "week" | "month";
+  selectedDay: string;
+  onOpenDay: (day: string) => void;
+}) {
+  return (
+    <>
+      <section className="mt-3 rounded-xl border border-border bg-card p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium">Days in this range</h2>
+          <Legend />
+        </div>
+        <RangeHeatmap
+          range={range}
+          mode={mode}
+          selectedDay={selectedDay}
+          onOpenDay={onOpenDay}
+        />
+      </section>
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-[1.35fr_1fr]">
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="mb-3 text-sm font-medium">Daily rhythm</h2>
+          <RangeTrend range={range} />
+        </section>
+        <section className="rounded-xl border border-border bg-card p-4">
+          <h2 className="mb-3 text-sm font-medium">Busiest days</h2>
+          <RangeBusiestDays range={range} onOpenDay={onOpenDay} />
+        </section>
+      </div>
+
+      <section className="mt-3 rounded-xl border border-border bg-card p-4">
+        <div className="mb-3 flex items-baseline justify-between gap-2">
+          <h2 className="text-sm font-medium">Threads</h2>
+          <span className="text-xs text-muted-foreground">
+            top {range.threads.length} by agent time
+          </span>
+        </div>
+        <RangeThreads range={range} />
+      </section>
+
+      <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+        A turn is provider execution time, not a measure of useful work. "Your
+        inputs" counts local callers without a sender thread, so a plain CLI
+        call looks like you. Agent questions are structured interactions such as
+        questions and approvals only; reading and focus are not recorded by BB.
+        {range.coverage.truncatedThreads.length > 0
+          ? ` ${range.coverage.truncatedThreads.length} thread(s) hit the event page limit.`
+          : ""}{" "}
+        {range.coverage.threadsScanned} threads scanned,{" "}
+        {range.coverage.eventsRead} events read.
+      </p>
+    </>
+  );
+}
+
 function DayPage() {
   const rpc = useRpc<typeof rpcContract>();
   const timezones = useMemo(timezoneOptions, []);
   const [timezone, setTimezone] = useState(browserTimezone);
   const [day, setDay] = useState(() => previousDay(browserTimezone()));
+  const [mode, setMode] = useState<"day" | "week" | "month">("day");
   const [showAutomated, setShowAutomated] = useState(false);
   const [showRequests, setShowRequests] = useState(false);
   const [report, setReport] = useState<DayReport | null>(null);
+  const [range, setRange] = useState<RangeReport | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [rangeError, setRangeError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [rangeLoading, setRangeLoading] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const forceFresh = useRef(false);
+  const dayCache = useRef(new Map<string, DayReport>());
+  const rangeCache = useRef(new Map<string, RangeReport>());
+  const dayRequest = useRef(0);
+  const rangeRequest = useRef(0);
+
+  const bounds = useMemo(() => {
+    if (mode === "week") return weekRange(day);
+    if (mode === "month") return monthRange(day);
+    return null;
+  }, [mode, day]);
+
   const threadCounts = useMemo(() => {
     if (report === null) return null;
     const order = threadOrder(report, threadSummaries(report));
@@ -998,30 +1407,135 @@ function DayPage() {
       subthreads: order.filter((entry) => entry.depth > 0).length,
     };
   }, [report]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const requestId = useRef(0);
 
-  const load = useCallback(async () => {
-    const id = requestId.current + 1;
-    requestId.current = id;
+  const loadDay = useCallback(async () => {
+    const id = dayRequest.current + 1;
+    dayRequest.current = id;
+    const fresh = forceFresh.current;
+    forceFresh.current = false;
+    const key = `${timezone}|${day}`;
+    if (!fresh) {
+      const cached = dayCache.current.get(key);
+      if (cached !== undefined) {
+        setReport(cached);
+        setError(null);
+        setLoading(false);
+        return;
+      }
+    }
     setLoading(true);
     try {
-      const result = await rpc.call("read_day", { day, timezone });
-      if (requestId.current !== id) return;
+      const result = await rpc.call("read_day", {
+        day,
+        timezone,
+        ...(fresh ? { fresh: true } : {}),
+      });
+      if (dayRequest.current !== id) return;
+      remember(dayCache.current, key, result, 60);
       setReport(result);
       setError(null);
     } catch (cause) {
-      if (requestId.current !== id) return;
+      if (dayRequest.current !== id) return;
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      if (requestId.current === id) setLoading(false);
+      if (dayRequest.current === id) setLoading(false);
     }
   }, [day, timezone, rpc]);
 
+  const loadRange = useCallback(async () => {
+    if (bounds === null) return;
+    const id = rangeRequest.current + 1;
+    rangeRequest.current = id;
+    const fresh = forceFresh.current;
+    forceFresh.current = false;
+    const key = `${timezone}|${bounds.startDay}|${bounds.endDay}`;
+    if (!fresh) {
+      const cached = rangeCache.current.get(key);
+      if (cached !== undefined) {
+        setRange(cached);
+        setRangeError(null);
+        setRangeLoading(false);
+        return;
+      }
+    }
+    setRangeLoading(true);
+    try {
+      const result = await rpc.call("read_range", {
+        startDay: bounds.startDay,
+        endDay: bounds.endDay,
+        timezone,
+        ...(fresh ? { fresh: true } : {}),
+      });
+      if (rangeRequest.current !== id) return;
+      remember(rangeCache.current, key, result, 24);
+      setRange(result);
+      setRangeError(null);
+    } catch (cause) {
+      if (rangeRequest.current !== id) return;
+      setRangeError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (rangeRequest.current === id) setRangeLoading(false);
+    }
+  }, [bounds, timezone, rpc]);
+
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (mode !== "day") return;
+    void loadDay();
+  }, [mode, loadDay, refreshToken]);
+
+  useEffect(() => {
+    if (mode === "day") return;
+    void loadRange();
+  }, [mode, loadRange, refreshToken]);
+
+  const refresh = () => {
+    dayCache.current.clear();
+    rangeCache.current.clear();
+    forceFresh.current = true;
+    setRefreshToken((current) => current + 1);
+  };
+
+  const modeLabels: Array<{ id: "day" | "week" | "month"; label: string }> = [
+    { id: "day", label: "Day" },
+    { id: "week", label: "Week" },
+    { id: "month", label: "Month" },
+  ];
+
+  const dayMatches =
+    report !== null && report.day === day && report.timezone === timezone;
+  const rangeMatches =
+    range !== null &&
+    bounds !== null &&
+    range.startDay === bounds.startDay &&
+    range.endDay === bounds.endDay &&
+    range.timezone === timezone;
+  const currentReport = dayMatches ? report : null;
+  const currentRange = rangeMatches ? range : null;
+
+  const title =
+    mode === "day"
+      ? currentReport === null
+        ? "Agent attention"
+        : longDate(currentReport)
+      : bounds === null
+        ? "Attention"
+        : mode === "week"
+          ? weekLabel(bounds.startDay, bounds.endDay)
+          : `${monthTitle(monthOf(bounds.startDay))}`;
+
+  const narrative =
+    mode === "day"
+      ? currentReport === null
+        ? "Reading one day of agent turns, your inputs, and waiting questions."
+        : dayNarrative(currentReport)
+      : currentRange === null
+        ? `Reading this ${mode}.`
+        : rangeNarrative(currentRange);
+
+  const summary =
+    mode === "day" ? currentReport?.summary : currentRange?.totals;
+  const active = mode === "day" ? loading : rangeLoading;
+  const activeError = mode === "day" ? error : rangeError;
 
   return (
     <div className="h-full min-h-0 flex-1 overflow-y-auto">
@@ -1034,22 +1548,41 @@ function DayPage() {
                   Attention · {timezone}
                 </div>
                 <h1 className="mt-1 text-2xl font-semibold tracking-tight md:text-3xl">
-                  {report === null ? "Agent attention" : longDate(report)}
+                  {title}
                 </h1>
                 <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-                  {report === null
-                    ? "Reading one day of agent turns, your inputs, and waiting questions."
-                    : dayNarrative(report)}
+                  {narrative}
                 </p>
+                <div className="mt-3 inline-flex rounded-md border border-border p-0.5">
+                  {modeLabels.map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      onClick={() => setMode(entry.id)}
+                      aria-pressed={mode === entry.id}
+                      className={cn(
+                        "rounded px-2.5 py-1 text-xs transition-colors",
+                        mode === entry.id
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-accent",
+                      )}
+                    >
+                      {entry.label}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="flex flex-wrap items-end gap-2">
                 <div className="text-xs text-muted-foreground">
-                  Day
+                  Anchor day
                   <div className="mt-0.5">
                     <DayPicker
                       value={day}
                       timezone={timezone}
-                      onChange={setDay}
+                      resetToken={refreshToken}
+                      onChange={(next) => {
+                        setDay(next);
+                      }}
                     />
                   </div>
                 </div>
@@ -1071,172 +1604,212 @@ function DayPage() {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => void load()}
-                  disabled={loading}
+                  onClick={refresh}
+                  disabled={active}
                 >
                   <Icon
                     name="RotateCcw"
-                    className={cn("mr-1 size-3.5", loading && "animate-spin")}
+                    className={cn("mr-1 size-3.5", active && "animate-spin")}
                   />
                   Refresh
                 </Button>
               </div>
             </div>
           </div>
-          {report === null ? (
+          {summary === undefined ? (
             <div className="px-4 py-8 text-sm text-muted-foreground md:px-5">
-              {loading ? "Reading thread history…" : "No report yet."}
+              {active ? "Reading thread history…" : "No report yet."}
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-x-4 gap-y-4 px-4 py-4 sm:grid-cols-3 lg:grid-cols-6 md:px-5">
               <Stat
                 label="Agent time"
-                value={duration(report.summary.turnMinutes * MINUTE)}
-                note={`${report.summary.turns} turns`}
+                value={duration(summary.turnMinutes * MINUTE)}
+                note={`${summary.turns} turns`}
               />
               <Stat
                 label="Your inputs"
-                value={String(report.summary.humanInputs)}
-                note={`${report.summary.agentInputs} agent · ${report.summary.systemInputs} system`}
+                value={String(summary.humanInputs)}
+                note={`${summary.agentInputs} agent · ${summary.systemInputs} system`}
               />
               <Stat
                 label="Peak running"
-                value={String(report.summary.peakConcurrency)}
-                note={`${report.summary.busyMinutes} min with 2+`}
+                value={String(summary.peakConcurrency)}
+                note={`${summary.busyMinutes} min with 2+`}
               />
-              <Stat
-                label="Threads"
-                value={String(report.summary.threadsActive)}
-                note={`${report.summary.threadTransitions} switches`}
-              />
-              <Stat
-                label="Requests"
-                value={String(report.summary.questions)}
-                note={`${report.summary.answeredQuestions} resolved`}
-              />
-              <Stat
-                label="Turn length"
-                value={
-                  report.summary.turns === 0
-                    ? "—"
-                    : duration(
-                        (report.summary.turnMinutes * MINUTE) /
-                          report.summary.turns,
-                      )
-                }
-                note="average"
-              />
+              {mode === "day" ? (
+                <>
+                  <Stat
+                    label="Threads"
+                    value={String(summary.threadsActive)}
+                    note={`${summary.threadTransitions} switches`}
+                  />
+                  <Stat
+                    label="Requests"
+                    value={String(summary.questions)}
+                    note={`${summary.answeredQuestions} resolved`}
+                  />
+                  <Stat
+                    label="Turn length"
+                    value={
+                      summary.turns === 0
+                        ? "—"
+                        : duration(
+                            (summary.turnMinutes * MINUTE) / summary.turns,
+                          )
+                    }
+                    note="average"
+                  />
+                </>
+              ) : (
+                <>
+                  <Stat
+                    label="Active days"
+                    value={String(
+                      currentRange === null ? 0 : activeDays(currentRange),
+                    )}
+                    note={`${currentRange?.days.length ?? 0} in range`}
+                  />
+                  <Stat
+                    label="Requests"
+                    value={String(summary.questions)}
+                    note={`${summary.answeredQuestions} resolved`}
+                  />
+                  <Stat
+                    label="Threads"
+                    value={String(summary.threadsActive)}
+                    note={`${currentRange?.threads.length ?? 0} in top list`}
+                  />
+                </>
+              )}
             </div>
           )}
         </section>
 
-        {error === null ? null : (
+        {activeError === null ? null : (
           <p role="alert" className="mt-3 text-sm text-destructive">
-            {error}
+            {activeError}
           </p>
         )}
 
-        {report === null ? null : (
-          <>
-            <section className="mt-3 rounded-xl border border-border bg-card p-4">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-sm font-medium">The shape of the day</h2>
-                <Legend />
-              </div>
-              <DayStrip report={report} />
-            </section>
+        {mode === "day" ? (
+          currentReport === null || report === null ? null : (
+            <>
+              <section className="mt-3 rounded-xl border border-border bg-card p-4">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-sm font-medium">The shape of the day</h2>
+                  <Legend />
+                </div>
+                <DayStrip report={report} />
+              </section>
 
-            <section className="mt-3 rounded-xl border border-border bg-card p-4">
-              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-sm font-medium">
-                  Threads on one clock
-                  <span className="ml-2 text-xs font-normal text-muted-foreground md:hidden">
-                    swipe to scroll
+              <section className="mt-3 rounded-xl border border-border bg-card p-4">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-sm font-medium">
+                    Threads on one clock
+                    <span className="ml-2 text-xs font-normal text-muted-foreground md:hidden">
+                      swipe to scroll
+                    </span>
+                  </h2>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                    <span>
+                      {threadCounts?.threads ?? 0} threads ·{" "}
+                      {threadCounts?.subthreads ?? 0} subthreads
+                    </span>
+                    <label className="flex items-center gap-2">
+                      <Checkbox
+                        checked={showAutomated}
+                        onCheckedChange={(checked) =>
+                          setShowAutomated(checked === true)
+                        }
+                        aria-label="Show agent and system inputs"
+                      />
+                      automated inputs
+                    </label>
+                  </div>
+                </div>
+                <Timeline report={report} showAutomated={showAutomated} />
+              </section>
+
+              <div className="mt-3 grid gap-3 lg:grid-cols-[1.35fr_1fr]">
+                <section className="rounded-xl border border-border bg-card p-4">
+                  <h2 className="mb-3 text-sm font-medium">Rhythm</h2>
+                  <Rhythm report={report} />
+                </section>
+                <section className="rounded-xl border border-border bg-card p-4">
+                  <h2 className="mb-3 text-sm font-medium">
+                    Busiest recorded windows
+                  </h2>
+                  <Busiest report={report} />
+                </section>
+              </div>
+
+              <section className="mt-3 rounded-xl border border-border bg-card p-4">
+                <div className="mb-3 flex items-baseline justify-between gap-2">
+                  <h2 className="text-sm font-medium">Threads</h2>
+                  <span className="text-xs text-muted-foreground">
+                    top {Math.min(8, report.summary.threadsActive)} by agent
+                    time
                   </span>
-                </h2>
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span>
-                    {threadCounts?.threads ?? 0} threads ·{" "}
-                    {threadCounts?.subthreads ?? 0} subthreads
-                  </span>
-                  <label className="flex items-center gap-2">
-                    <Checkbox
-                      checked={showAutomated}
-                      onCheckedChange={(checked) =>
-                        setShowAutomated(checked === true)
-                      }
-                      aria-label="Show agent and system inputs"
+                </div>
+                <ThreadCards report={report} />
+              </section>
+
+              <section className="mt-3 rounded-xl border border-border bg-card p-4">
+                <button
+                  type="button"
+                  onClick={() => setShowRequests((current) => !current)}
+                  aria-expanded={showRequests}
+                  className="flex w-full items-center justify-between gap-2 text-left"
+                >
+                  <span className="text-sm font-medium">Agent requests</span>
+                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                    {report.summary.questions} made ·{" "}
+                    {report.summary.answeredQuestions} resolved
+                    <Icon
+                      name="ChevronDown"
+                      className={cn(
+                        "size-3.5 transition-transform",
+                        showRequests && "rotate-180",
+                      )}
                     />
-                    automated inputs
-                  </label>
-                </div>
-              </div>
-              <Timeline report={report} showAutomated={showAutomated} />
-            </section>
-
-            <div className="mt-3 grid gap-3 lg:grid-cols-[1.35fr_1fr]">
-              <section className="rounded-xl border border-border bg-card p-4">
-                <h2 className="mb-3 text-sm font-medium">Rhythm</h2>
-                <Rhythm report={report} />
+                  </span>
+                </button>
+                {showRequests ? (
+                  <div className="mt-3">
+                    <Questions report={report} />
+                  </div>
+                ) : null}
               </section>
-              <section className="rounded-xl border border-border bg-card p-4">
-                <h2 className="mb-3 text-sm font-medium">
-                  Busiest recorded windows
-                </h2>
-                <Busiest report={report} />
-              </section>
-            </div>
 
-            <section className="mt-3 rounded-xl border border-border bg-card p-4">
-              <div className="mb-3 flex items-baseline justify-between gap-2">
-                <h2 className="text-sm font-medium">Threads</h2>
-                <span className="text-xs text-muted-foreground">
-                  top {Math.min(8, report.summary.threadsActive)} by agent time
-                </span>
-              </div>
-              <ThreadCards report={report} />
-            </section>
-
-            <section className="mt-3 rounded-xl border border-border bg-card p-4">
-              <button
-                type="button"
-                onClick={() => setShowRequests((current) => !current)}
-                aria-expanded={showRequests}
-                className="flex w-full items-center justify-between gap-2 text-left"
-              >
-                <span className="text-sm font-medium">Agent requests</span>
-                <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                  {report.summary.questions} made ·{" "}
-                  {report.summary.answeredQuestions} resolved
-                  <Icon
-                    name="ChevronDown"
-                    className={cn(
-                      "size-3.5 transition-transform",
-                      showRequests && "rotate-180",
-                    )}
-                  />
-                </span>
-              </button>
-              {showRequests ? (
-                <div className="mt-3">
-                  <Questions report={report} />
-                </div>
-              ) : null}
-            </section>
-
-            <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
-              A turn is provider execution time, not a measure of useful work.
-              "Your inputs" counts local callers without a sender thread, so a
-              plain CLI call looks like you. Agent questions are structured
-              interactions such as questions and approvals only; reading and
-              focus are not recorded by BB.
-              {report.coverage.truncatedThreads.length > 0
-                ? ` ${report.coverage.truncatedThreads.length} thread(s) hit the event page limit.`
-                : ""}{" "}
-              {report.coverage.threadsScanned} threads scanned,{" "}
-              {report.coverage.eventsRead} events read.
-            </p>
-          </>
+              <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+                A turn is provider execution time, not a measure of useful work.
+                "Your inputs" counts local callers without a sender thread, so a
+                plain CLI call looks like you. Agent questions are structured
+                interactions such as questions and approvals only; reading and
+                focus are not recorded by BB.
+                {report.coverage.truncatedThreads.length > 0
+                  ? ` ${report.coverage.truncatedThreads.length} thread(s) hit the event page limit.`
+                  : ""}{" "}
+                {report.coverage.threadsScanned} threads scanned,{" "}
+                {report.coverage.eventsRead} events read.
+              </p>
+            </>
+          )
+        ) : currentRange === null ? (
+          <div className="mt-3 rounded-xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
+            {rangeLoading ? `Reading this ${mode}…` : "No report yet."}
+          </div>
+        ) : (
+          <RangeView
+            range={currentRange}
+            mode={mode}
+            selectedDay={day}
+            onOpenDay={(next) => {
+              setDay(next);
+              setMode("day");
+            }}
+          />
         )}
       </div>
     </div>
