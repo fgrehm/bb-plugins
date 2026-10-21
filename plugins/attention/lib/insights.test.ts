@@ -4,6 +4,7 @@ import {
   busiestWindows,
   dayNarrative,
   hourlyBuckets,
+  threadOrder,
   threadSummaries,
 } from "./insights.js";
 import type { DayThread } from "./contract.js";
@@ -144,5 +145,72 @@ describe("narrative", () => {
     expect(text).toContain("You sent 2 inputs");
     expect(text).toContain("1 request for input");
     expect(text).not.toMatch(/score|productiv|focus/i);
+  });
+});
+
+describe("thread order", () => {
+  it("nests subthreads under their parent and sorts by agent time", () => {
+    const parent: DayThread = { ...thread("thr_parent"), parentThreadId: null };
+    const child: DayThread = {
+      ...thread("thr_child"),
+      parentThreadId: "thr_parent",
+    };
+    const orphan: DayThread = {
+      ...thread("thr_orphan"),
+      parentThreadId: "thr_missing",
+    };
+    const events: RawEvent[] = [
+      {
+        kind: "turn-start",
+        at: at(9),
+        threadId: "thr_parent",
+        turnId: "p1",
+      },
+      {
+        kind: "turn-end",
+        at: at(9, 30),
+        threadId: "thr_parent",
+        turnId: "p1",
+        status: "completed",
+      },
+      { kind: "turn-start", at: at(9, 5), threadId: "thr_child", turnId: "c1" },
+      {
+        kind: "turn-end",
+        at: at(9, 10),
+        threadId: "thr_child",
+        turnId: "c1",
+        status: "completed",
+      },
+      {
+        kind: "turn-start",
+        at: at(9, 20),
+        threadId: "thr_orphan",
+        turnId: "o1",
+      },
+      {
+        kind: "turn-end",
+        at: at(9, 25),
+        threadId: "thr_orphan",
+        turnId: "o1",
+        status: "completed",
+      },
+    ];
+    const nested = buildReport({
+      day: DAY,
+      timezone: "UTC",
+      threads: [parent, child, orphan],
+      events,
+      truncatedThreads: [],
+    });
+    const order = threadOrder(nested, threadSummaries(nested));
+    expect(order.map((entry) => [entry.id, entry.depth])).toEqual([
+      ["thr_parent", 0],
+      ["thr_child", 1],
+      ["thr_orphan", 0],
+    ]);
+    expect(order[0]?.childCount).toBe(1);
+    expect(order[0]?.descendants).toBe(1);
+    expect(order[0]?.descendantAgentMs).toBe(5 * 60_000);
+    expect(order[2]?.detached).toBe(true);
   });
 });

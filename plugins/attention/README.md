@@ -14,7 +14,10 @@ score productivity, attention, or cognitive load.
 - **The shape of the day**: a half-hour strip of agent activity, with your
   inputs marked along its base.
 - **Threads on one clock**: one row per thread with turn bands, your input
-  ticks, and bands for structured requests waiting on an answer.
+  ticks, a faint first-to-last activity span, and bands for structured requests
+  waiting on an answer. Subthreads are nested under their parent and can be
+  collapsed; a collapsed parent shows how much work its children hold. Each
+  row carries agent time, turns, and your inputs.
 - **Rhythm**: agent-minutes and your inputs per hour, on the same axis.
 - **Busiest recorded windows**: the half hours with the most of your inputs,
   with agent time as the tie-break.
@@ -48,6 +51,9 @@ data stays in the BB server and is computed on demand.
   agent.
 - **Reading and focus are not recorded by BB.** Thread switches count changes
   between your recorded inputs, not changes in what you were looking at.
+- **Subthreads are included.** Every thread with activity that day is a row and
+  counts in the totals, including child threads, side chats, and archived
+  threads. A child whose parent is inactive that day appears at the top level.
 - **Only structured requests count.** Questions and approvals raised through an
   interaction are recorded. A question typed into an assistant reply is
   invisible, and a request opened before the selected day and answered during

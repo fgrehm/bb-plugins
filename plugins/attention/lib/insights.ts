@@ -156,6 +156,84 @@ export function threadSummaries(report: DayReport): ThreadSummary[] {
   );
 }
 
+export interface ThreadOrderEntry {
+  id: string;
+  depth: number;
+  parentId: string | null;
+  childCount: number;
+  descendants: number;
+  descendantAgentMs: number;
+  detached: boolean;
+}
+
+export function threadOrder(
+  report: DayReport,
+  summaries: ThreadSummary[],
+): ThreadOrderEntry[] {
+  const active = new Map(report.threads.map((thread) => [thread.id, thread]));
+  const byId = new Map(summaries.map((summary) => [summary.id, summary]));
+  const children = new Map<string, string[]>();
+  const roots: string[] = [];
+  const detached = new Set<string>();
+
+  for (const summary of summaries) {
+    const thread = active.get(summary.id);
+    const parentId = thread?.parentThreadId ?? null;
+    if (parentId === null) {
+      roots.push(summary.id);
+      continue;
+    }
+    if (!active.has(parentId) || parentId === summary.id) {
+      roots.push(summary.id);
+      detached.add(summary.id);
+      continue;
+    }
+    const siblings = children.get(parentId) ?? [];
+    siblings.push(summary.id);
+    children.set(parentId, siblings);
+  }
+
+  const byAgentTime = (a: string, b: string) =>
+    (byId.get(b)?.agentMs ?? 0) - (byId.get(a)?.agentMs ?? 0);
+  const byStart = (a: string, b: string) =>
+    (byId.get(a)?.firstAt ?? 0) - (byId.get(b)?.firstAt ?? 0);
+
+  roots.sort(byAgentTime);
+  for (const siblings of children.values()) siblings.sort(byStart);
+
+  const ordered: ThreadOrderEntry[] = [];
+  const seen = new Set<string>();
+  const visit = (
+    id: string,
+    depth: number,
+    parentId: string | null,
+  ): { count: number; agentMs: number } => {
+    if (seen.has(id) || depth > 8) return { count: 0, agentMs: 0 };
+    seen.add(id);
+    const kids = children.get(id) ?? [];
+    const entry: ThreadOrderEntry = {
+      id,
+      depth,
+      parentId,
+      childCount: kids.length,
+      descendants: 0,
+      descendantAgentMs: 0,
+      detached: detached.has(id),
+    };
+    ordered.push(entry);
+    for (const child of kids) {
+      const nested = visit(child, depth + 1, id);
+      entry.descendants += 1 + nested.count;
+      entry.descendantAgentMs +=
+        (byId.get(child)?.agentMs ?? 0) + nested.agentMs;
+    }
+    return { count: entry.descendants, agentMs: entry.descendantAgentMs };
+  };
+  for (const root of roots) visit(root, 0, null);
+  for (const summary of summaries) visit(summary.id, 0, null);
+  return ordered;
+}
+
 export function dayNarrative(report: DayReport): string {
   const { summary } = report;
   if (summary.turns === 0 && summary.humanInputs === 0) {

@@ -15,6 +15,7 @@ import {
   busiestWindows,
   dayNarrative,
   hourlyBuckets,
+  threadOrder,
   threadSummaries,
 } from "./lib/insights";
 import { Button } from "@/components/ui/button";
@@ -256,20 +257,36 @@ function Timeline({
 }) {
   const navigate = useBbNavigate();
   const summaries = useMemo(() => threadSummaries(report), [report]);
-  const titleById = useMemo(
+  const order = useMemo(
+    () => threadOrder(report, summaries),
+    [report, summaries],
+  );
+  const summaryById = useMemo(
+    () => new Map(summaries.map((summary) => [summary.id, summary])),
+    [summaries],
+  );
+  const threadById = useMemo(
     () => new Map(report.threads.map((thread) => [thread.id, thread])),
     [report],
   );
-  const rows = summaries
-    .map((summary) => titleById.get(summary.id))
-    .filter((thread): thread is DayThread => thread !== undefined)
-    .slice(0, 32);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const marks = hourMarks(report);
+
+  const visible = order.filter((entry) => {
+    let parentId = entry.parentId;
+    while (parentId !== null) {
+      if (collapsed.has(parentId)) return false;
+      parentId = threadById.get(parentId)?.parentThreadId ?? null;
+    }
+    return true;
+  });
+  const shown = visible.slice(0, 40);
+  const hiddenCount = visible.length - shown.length;
 
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-[46rem]">
-        <div className="grid grid-cols-[12rem_1fr] gap-2">
+      <div className="min-w-[56rem]">
+        <div className="grid grid-cols-[18rem_1fr] gap-2">
           <div />
           <div className="relative h-5 text-xs text-muted-foreground">
             {marks.map((mark, index) => (
@@ -291,7 +308,10 @@ function Timeline({
             ))}
           </div>
         </div>
-        {rows.map((thread) => {
+        {shown.map((entry) => {
+          const thread = threadById.get(entry.id);
+          const summary = summaryById.get(entry.id);
+          if (thread === undefined || summary === undefined) return null;
           const turns = report.turns.filter(
             (turn) => turn.threadId === thread.id,
           );
@@ -303,32 +323,114 @@ function Timeline({
           const questions = report.questions.filter(
             (question) => question.threadId === thread.id,
           );
+          const isCollapsed = collapsed.has(thread.id);
+          const hasChildren = entry.childCount > 0;
+          const parentTitle =
+            entry.parentId === null
+              ? null
+              : (threadById.get(entry.parentId)?.title ?? null);
+          const spanStart = summary.firstAt;
+          const spanEnd = summary.lastAt;
           return (
             <div
               key={thread.id}
-              className="grid grid-cols-[12rem_1fr] items-center gap-2 py-0.5"
+              className="grid grid-cols-[18rem_1fr] items-center gap-2 py-0.5"
             >
-              <button
-                type="button"
-                onClick={() => navigate.toThread(thread.id)}
-                title={thread.title}
-                className="truncate pr-1 text-left text-xs text-muted-foreground hover:text-foreground"
-              >
-                {thread.archived ? (
-                  <Icon
-                    name="Archive"
-                    className="mr-1 inline size-3 opacity-70"
-                  />
-                ) : null}
-                {thread.title}
-              </button>
               <div
-                className="relative h-8 rounded-sm"
+                className="flex min-w-0 items-start gap-1"
+                style={{ paddingLeft: entry.depth * 14 }}
+              >
+                {hasChildren ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCollapsed((current) => {
+                        const next = new Set(current);
+                        if (next.has(thread.id)) next.delete(thread.id);
+                        else next.add(thread.id);
+                        return next;
+                      })
+                    }
+                    aria-expanded={!isCollapsed}
+                    aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${
+                      thread.title
+                    } and ${entry.childCount} subthread${
+                      entry.childCount === 1 ? "" : "s"
+                    }`}
+                    className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded hover:bg-accent"
+                  >
+                    <Icon
+                      name="ChevronDown"
+                      className={cn(
+                        "size-3 text-muted-foreground transition-transform",
+                        isCollapsed && "-rotate-90",
+                      )}
+                    />
+                  </button>
+                ) : (
+                  <span className="w-4 shrink-0" />
+                )}
+                <button
+                  type="button"
+                  onClick={() => navigate.toThread(thread.id)}
+                  title={
+                    entry.depth > 0 && parentTitle !== null
+                      ? `Subthread of ${parentTitle}`
+                      : entry.detached
+                        ? "Subthread whose parent is not active today"
+                        : thread.title
+                  }
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+                    {entry.depth > 0 ? (
+                      <Icon
+                        name="CornerDownRight"
+                        className="size-3 shrink-0 opacity-60"
+                      />
+                    ) : null}
+                    {thread.archived ? (
+                      <Icon
+                        name="Archive"
+                        className="size-3 shrink-0 opacity-70"
+                      />
+                    ) : null}
+                    <span className="truncate">{thread.title}</span>
+                  </span>
+                  <span className="block truncate text-xs tabular-nums text-muted-foreground/80">
+                    {duration(summary.agentMs)} · {summary.turns}{" "}
+                    {summary.turns === 1 ? "turn" : "turns"} · {summary.inputs}{" "}
+                    {summary.inputs === 1 ? "input" : "inputs"}
+                    {isCollapsed && entry.descendants > 0
+                      ? ` · +${entry.descendants} sub (${duration(
+                          entry.descendantAgentMs,
+                        )})`
+                      : ""}
+                  </span>
+                </button>
+              </div>
+              <div
+                className="relative h-9 rounded-sm"
                 style={{
                   background:
                     "repeating-linear-gradient(90deg, transparent 0, transparent calc(12.5% - 1px), var(--border) calc(12.5% - 1px), var(--border) 12.5%)",
                 }}
               >
+                {spanStart !== null && spanEnd !== null ? (
+                  <div
+                    className="absolute top-1/2 h-[2px] -translate-y-1/2 rounded-full"
+                    style={{
+                      left: `${percent(spanStart, report)}%`,
+                      width: `${Math.max(percent(spanEnd, report) - percent(spanStart, report), 0.2)}%`,
+                      background:
+                        "color-mix(in oklab, var(--muted-foreground) 22%, transparent)",
+                    }}
+                    title={`Recorded activity ${clock(
+                      spanStart,
+                      report.timezone,
+                    )} → ${clock(spanEnd, report.timezone)}`}
+                  />
+                ) : null}
                 {turns.map((turn) => {
                   const left = percent(turn.start, report);
                   const width = percent(turn.end, report) - left;
@@ -344,7 +446,7 @@ function Timeline({
                       )} · ${turn.status} · ${turn.initiator}${
                         turn.model === null ? "" : ` · ${turn.model}`
                       }`}
-                      className="absolute top-1.5 h-3 rounded-[2px]"
+                      className="absolute top-2 h-3 rounded-[2px]"
                       style={{
                         left: `${left}%`,
                         width: `${Math.max(width, 0.12)}%`,
@@ -381,32 +483,42 @@ function Timeline({
                     />
                   );
                 })}
-                {inputs.map((input, index) => (
-                  <div
-                    key={`${input.at}:${index}`}
-                    title={`${clock(input.at, report.timezone)} · ${
-                      input.initiator === "user" ? "you" : input.initiator
-                    } · ${input.kind}${
-                      input.queueDelayMs === null
-                        ? ""
-                        : ` · dispatch ${duration(input.queueDelayMs)}`
-                    }`}
-                    className="absolute top-0.5 bottom-0.5 w-[2px]"
-                    style={{
-                      left: `${percent(input.at, report)}%`,
-                      background:
-                        input.initiator === "user"
-                          ? "var(--attention)"
-                          : "var(--muted-foreground)",
-                      opacity: input.initiator === "user" ? 1 : 0.4,
-                    }}
-                  />
-                ))}
+                {inputs.map((input, index) => {
+                  const steer = input.kind === "steer" || input.kind === "auto";
+                  return (
+                    <div
+                      key={`${input.at}:${index}`}
+                      title={`${clock(input.at, report.timezone)} · ${
+                        input.initiator === "user" ? "you" : input.initiator
+                      } · ${input.kind}${
+                        input.queueDelayMs === null
+                          ? ""
+                          : ` · dispatch ${duration(input.queueDelayMs)}`
+                      }`}
+                      className="absolute w-[2px]"
+                      style={{
+                        top: steer ? 12 : 4,
+                        bottom: steer ? 12 : 4,
+                        left: `${percent(input.at, report)}%`,
+                        background:
+                          input.initiator === "user"
+                            ? "var(--attention)"
+                            : "var(--muted-foreground)",
+                        opacity: input.initiator === "user" ? 1 : 0.4,
+                      }}
+                    />
+                  );
+                })}
               </div>
             </div>
           );
         })}
-        {rows.length === 0 ? (
+        {hiddenCount > 0 ? (
+          <p className="py-2 pl-5 text-xs text-muted-foreground">
+            {hiddenCount} more threads not shown.
+          </p>
+        ) : null}
+        {shown.length === 0 ? (
           <div className="py-8 text-center text-sm text-muted-foreground">
             No turns, inputs, or questions recorded that day.
           </div>
@@ -864,6 +976,14 @@ function DayPage() {
   const [showAutomated, setShowAutomated] = useState(false);
   const [showRequests, setShowRequests] = useState(false);
   const [report, setReport] = useState<DayReport | null>(null);
+  const threadCounts = useMemo(() => {
+    if (report === null) return null;
+    const order = threadOrder(report, threadSummaries(report));
+    return {
+      threads: order.length,
+      subthreads: order.filter((entry) => entry.depth > 0).length,
+    };
+  }, [report]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const requestId = useRef(0);
@@ -1020,16 +1140,22 @@ function DayPage() {
                     swipe to scroll
                   </span>
                 </h2>
-                <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Checkbox
-                    checked={showAutomated}
-                    onCheckedChange={(checked) =>
-                      setShowAutomated(checked === true)
-                    }
-                    aria-label="Show agent and system inputs"
-                  />
-                  automated inputs
-                </label>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <span>
+                    {threadCounts?.threads ?? 0} threads ·{" "}
+                    {threadCounts?.subthreads ?? 0} subthreads
+                  </span>
+                  <label className="flex items-center gap-2">
+                    <Checkbox
+                      checked={showAutomated}
+                      onCheckedChange={(checked) =>
+                        setShowAutomated(checked === true)
+                      }
+                      aria-label="Show agent and system inputs"
+                    />
+                    automated inputs
+                  </label>
+                </div>
               </div>
               <Timeline report={report} showAutomated={showAutomated} />
             </section>
