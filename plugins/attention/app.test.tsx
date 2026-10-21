@@ -103,6 +103,13 @@ describe("attention panel", () => {
       { subPath: "" },
       {
         rpc: {
+          read_family: () => ({
+            rootId: thread.id,
+            firstDay: DAY,
+            lastDay: DAY,
+            warnings: [],
+            report,
+          }),
           read_day: () => report,
           list_days: () => ({ days: [DAY] }),
           read_range: () => range,
@@ -130,6 +137,24 @@ describe("attention panel", () => {
       expect(slot.queryByText("Which branch should this land on?")).not.toBe(
         null,
       ),
+    );
+
+    fireEvent.click(
+      slot.getByLabelText("Explore family: Ship the attention page"),
+    );
+    await waitFor(() =>
+      expect(slot.queryByText("When did you come back?")).not.toBe(null),
+    );
+    expect(slot.getByLabelText("Visit gap in minutes")).toBeTruthy();
+    fireEvent.change(slot.getByLabelText("Visit gap in minutes"), {
+      target: { value: "60" },
+    });
+    expect(slot.getByText("60 minutes")).toBeTruthy();
+    fireEvent.click(slot.getByText("Requests and waits (1)"));
+    expect(slot.getByText("Which branch should this land on?")).toBeTruthy();
+    fireEvent.click(slot.getByText("← Back to Attention"));
+    await waitFor(() =>
+      expect(slot.queryByText("Estimated human time")).not.toBe(null),
     );
 
     fireEvent.click(slot.getByLabelText(/^Choose day,/));
@@ -172,6 +197,13 @@ describe("attention panel", () => {
       { subPath: "" },
       {
         rpc: {
+          read_family: () => ({
+            rootId: thread.id,
+            firstDay: DAY,
+            lastDay: DAY,
+            warnings: [],
+            report: empty,
+          }),
           read_day: () => empty,
           list_days: () => ({ days: [] }),
           read_range: () => ({ ...range, days: [], totals: empty.summary }),

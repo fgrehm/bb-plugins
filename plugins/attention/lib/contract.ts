@@ -167,7 +167,25 @@ export const listDaysResultSchema = z.object({
 });
 export type ListDaysResult = z.infer<typeof listDaysResultSchema>;
 
+export const readFamilyInputSchema = z.object({
+  threadId: z.string().min(1),
+  timezone: z.string().min(1).max(64),
+  startDay: DAY_INPUT.optional(),
+  endDay: DAY_INPUT.optional(),
+});
+export type ReadFamilyInput = z.infer<typeof readFamilyInputSchema>;
+
+export const familyReportSchema = z.object({
+  rootId: z.string(),
+  firstDay: z.string(),
+  lastDay: z.string(),
+  warnings: z.array(z.string()),
+  report: dayReportSchema,
+});
+export type FamilyReport = z.infer<typeof familyReportSchema>;
+
 export const rpcContract = defineRpcContract({
+  read_family: { input: readFamilyInputSchema, output: familyReportSchema },
   read_day: {
     input: readDayInputSchema,
     output: dayReportSchema,

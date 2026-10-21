@@ -8,6 +8,8 @@ import {
   type RangeReport,
   type ReadDayInput,
   type ReadRangeInput,
+  type ReadFamilyInput,
+  type FamilyReport,
 } from "./lib/contract.js";
 import {
   buildReport,
@@ -17,6 +19,8 @@ import {
   type RawEvent,
 } from "./lib/day.js";
 import { threadSummaries } from "./lib/insights.js";
+import { collectFamily } from "./lib/family.js";
+import { addDays } from "./lib/calendar.js";
 
 const EVENT_TYPES = [
   "client/turn/requested",
@@ -81,7 +85,20 @@ type EventRow = Awaited<
   ReturnType<BbPluginApi["sdk"]["threads"]["events"]["list"]>
 >[number];
 
-function toDayThread(thread: ThreadRow): DayThread {
+function toDayThread(
+  thread: Pick<
+    ThreadRow,
+    | "id"
+    | "title"
+    | "titleFallback"
+    | "projectId"
+    | "providerId"
+    | "parentThreadId"
+    | "archivedAt"
+    | "visibility"
+    | "createdAt"
+  >,
+): DayThread {
   return {
     id: thread.id,
     title: thread.title ?? thread.titleFallback ?? "(untitled)",
@@ -601,10 +618,118 @@ async function readRange(
   return report;
 }
 
+export async function readFamily(
+  bb: BbPluginApi,
+  input: ReadFamilyInput,
+): Promise<FamilyReport> {
+  const timezone = isValidTimeZone(input.timezone) ? input.timezone : "UTC";
+  for (const day of [input.startDay, input.endDay]) {
+    if (
+      day !== undefined &&
+      (!Number.isFinite(Date.parse(`${day}T00:00:00Z`)) ||
+        new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day)
+    ) {
+      throw new Error("Choose valid calendar dates.");
+    }
+  }
+  const selected = await bb.sdk.threads.get({ threadId: input.threadId });
+  if (selected.deletedAt !== null)
+    throw new Error("This thread has been deleted.");
+  const family = await collectFamily(
+    toDayThread(selected),
+    async (id) => toDayThread(await bb.sdk.threads.get({ threadId: id })),
+    async (id) => {
+      const children = await bb.sdk.threads.list({
+        parentThreadId: id,
+        includeHidden: true,
+        limit: MAX_THREADS + 1,
+      });
+      return children
+        .filter((thread) => thread.deletedAt === null)
+        .map(toDayThread);
+    },
+    MAX_THREADS,
+  );
+  const events: RawEvent[] = [];
+  const truncatedThreads: string[] = [];
+  for (const thread of family.threads) {
+    const result = await readThreadEvents(bb, thread.id, 0, RANGE_EVENT_PAGES);
+    events.push(...result.events);
+    if (result.truncated) truncatedThreads.push(thread.id);
+  }
+  const now = Date.now();
+  const timestamps = events
+    .filter((event) => event.at <= now)
+    .map((event) => event.at);
+  const earliest = timestamps.reduce(
+    (a, b) => Math.min(a, b),
+    timestamps[0] ?? selected.createdAt,
+  );
+  const latest = timestamps.reduce(
+    (a, b) => Math.max(a, b),
+    timestamps[0] ?? selected.createdAt,
+  );
+  const firstDay = dayStringAt(earliest, timezone);
+  const lastDay = dayStringAt(latest, timezone);
+  const floor = addDays(lastDay, -365);
+  const startDay = input.startDay ?? (firstDay < floor ? floor : firstDay);
+  const endDay = input.endDay ?? lastDay;
+  const { start } = dayBounds(startDay, timezone);
+  const { end } = dayBounds(endDay, timezone);
+  if (startDay > endDay || end - start > 367 * 86_400_000) {
+    throw new Error("Choose an ordered window of at most 366 calendar days.");
+  }
+  if (addDays(startDay, 365) < endDay)
+    throw new Error("Family windows are limited to 366 days.");
+  const warnings = [...family.warnings];
+  if (firstDay < floor && input.startDay === undefined)
+    warnings.push(
+      "Showing the latest 366 days of available family history. Choose dates to inspect an earlier window.",
+    );
+  if (truncatedThreads.length)
+    warnings.push(
+      "Some thread history exceeded 30 event pages. Available-history dates and totals may be incomplete.",
+    );
+  const report = buildReport({
+    day: startDay,
+    timezone,
+    threads: family.threads,
+    events,
+    truncatedThreads,
+    window: { start, end },
+    includeBins: false,
+    now,
+  });
+  // Keep inactive relatives visible, including a quiet root or a child outside the window.
+  report.threads = family.threads;
+  // Family markers use actual available openings, not the day view's clipped bands.
+  const openings = new Map<string, number>();
+  for (const event of events) {
+    if (event.kind !== "question") continue;
+    const key = `${event.threadId}\u0000${event.interactionId}`;
+    openings.set(key, Math.min(openings.get(key) ?? event.at, event.at));
+  }
+  report.questions = report.questions.map((question) => {
+    const opened =
+      openings.get(`${question.threadId}\u0000${question.id}`) ??
+      question.opened;
+    return {
+      ...question,
+      opened,
+      waitMs: Math.max(
+        0,
+        Math.min(question.resolved ?? now, now, end) - opened,
+      ),
+    };
+  });
+  return { rootId: family.root.id, firstDay, lastDay, warnings, report };
+}
+
 export default async function plugin(bb: BbPluginApi) {
   bb.log.info("attention: loaded");
 
   bb.rpc.register(rpcContract, {
+    read_family: (input) => readFamily(bb, input),
     read_day: (input) => readDay(bb, input),
     list_days: (input) => listDays(bb, input),
     read_range: (input) => readRange(bb, input),

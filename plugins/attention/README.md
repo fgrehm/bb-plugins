@@ -33,13 +33,23 @@ score productivity, attention, or cognitive load.
   and requests) plus switching time (recorded thread changes). The per-item
   seconds are assumptions you can adjust, and they are saved locally.
 
-Click a thread name or card to open it.
+Click a thread name to open it. Select **Explore family** on a day thread card to follow the parent and all descendants across days.
+
+## Thread family history
+
+The family page puts your recorded returns first: input ticks and shaded visits, structured request openings, and turn execution on daily timelines. It includes quiet days and inactive relatives, including archived and hidden threads. Opening a child resolves its available ancestors and includes siblings and descendants. Separate continuation threads are not linked automatically.
+
+A visit groups adjacent user-classified inputs within an adjustable gap (5–60 minutes, default 15) and always breaks at local midnight. The gap is an assumption, not measured focus. Activity in other thread families can interrupt a visit without appearing here. Expand the visits to inspect individual input times, threads, and input kinds. Expand requests to see one row per lifecycle and its available full wait across midnight.
+
+Choose a date window or **Available history**. All counts on this page refer to the selected window, except the explicitly labeled available-history dates. Calendar totals and human-time estimates are unchanged. **Back to Attention** preserves the mounted calendar's selection. BB can remount the page on reload or a responsive layout change, which resets its local view state.
+
+Family reads are uncached and refreshed on opening, changing dates, or **Refresh**. Traversal is limited to 80 threads and 30 pages of 100 events per member. Warnings identify partial ancestry, family truncation, and event-page limits. The default window covers at most the latest 366 days of available history; choose dates for earlier windows. Older events outside the paging limit cannot be recovered by choosing earlier dates.
 
 ## What it reads
 
 The plugin reads BB's own thread history through the public SDK:
 
-- `threads.list` for thread metadata;
+- `threads.list` and `threads.get` for thread metadata and family ancestry;
 - `threads.events.list` for turn, input, and interaction lifecycle events;
 - `threads.events` carries `initiator`, `target.kind`, `turn_id`, and
   interaction status, which is what makes the timeline possible.
@@ -52,8 +62,7 @@ data stays in the BB server and is computed on demand.
 
 Day and range reports are cached in the plugin server's memory for five
 minutes, and in the page for the current session. Past days and past ranges are
-cached; today and any range that includes today are recomputed so new work
-shows up. **Refresh** clears the page caches and tells the server to bypass its
+cached; the server recomputes today and current ranges when requested. The page refreshes periods that include today every 60 seconds while the calendar is open. **Refresh** clears the page caches and tells the server to bypass its
 cache. The calendar's availability is cached separately.
 
 Ranges are limited to 62 days. Range thread lists show the top 12 by agent
@@ -74,8 +83,7 @@ time; the day view remains the place for full per-thread and per-request detail.
   threads. A child whose parent is inactive that day appears at the top level.
 - **Only structured requests count.** Questions and approvals raised through an
   interaction are recorded. A question typed into an assistant reply is
-  invisible, and a request opened before the selected day and answered during
-  it is not shown.
+  invisible. Calendar reports attempt a bounded lookback for requests closed in the window whose opening is missing (up to three lifecycle-event pages, scanning toward seven days earlier). Older or still-pending requests may be missed. The family view reconstructs lifecycles from its available event history.
 - **Queued messages are timed at dispatch.** BB deletes the queue row when the
   message goes out, so the wait between typing and sending is not in history.
 - **Token and context history is not per turn.** BB keeps only the latest

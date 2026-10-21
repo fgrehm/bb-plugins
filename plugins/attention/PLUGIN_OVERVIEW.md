@@ -16,6 +16,7 @@ you stepped in, and when an agent was waiting for your answer.
 - **Thread cards** for the busiest eight, each with a miniature timeline and
   agent time, turns, inputs, and requests.
 - **Agent requests** with thread, wait, and outcome, collapsed until opened.
+- **Thread family history** from day thread cards: follow a parent and descendants across days, with adjustable recorded visits, input ticks, request openings, and agent execution. Inspect visits and waits or choose a date window; calendar totals stay unchanged.
 - **Week and Month views** with a daily heatmap, daily rhythm, busiest days, and
   top threads; click a day to open its timeline.
 - **Estimated human time** for the day or range: interacting plus switching
@@ -48,4 +49,4 @@ retained. Archived threads are included; deleted threads are gone.
 
 Day and range reports are cached in the plugin server for five minutes and in
 the page for the session. Today and ranges that include today are recomputed.
-Refresh bypasses both caches. Ranges are limited to 62 days.
+Refresh bypasses both caches. Ranges are limited to 62 days. Family reads are uncached, limited to 80 members and 30 event pages per member, and show coverage warnings. Family date windows cover at most 366 days. Visits group nearby recorded inputs, not measured focus or attention; unrelated-thread interruptions are not shown.

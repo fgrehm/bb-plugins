@@ -22,6 +22,7 @@ import {
   type EstimateAssumptions,
 } from "./lib/estimate";
 import { summaryMarkdown } from "./lib/export";
+import { FamilyPage } from "./family-page";
 import {
   activeDays,
   busiestWindows,
@@ -683,7 +684,13 @@ function Rhythm({ report }: { report: DayReport }) {
   );
 }
 
-function ThreadCards({ report }: { report: DayReport }) {
+function ThreadCards({
+  report,
+  onFamily,
+}: {
+  report: DayReport;
+  onFamily: (id: string) => void;
+}) {
   const navigate = useBbNavigate();
   const cards = useMemo(() => {
     const byId = new Map(report.threads.map((thread) => [thread.id, thread]));
@@ -702,17 +709,19 @@ function ThreadCards({ report }: { report: DayReport }) {
           (turn) => turn.threadId === thread.id,
         );
         return (
-          <button
+          <div
             key={thread.id}
-            type="button"
-            onClick={() => navigate.toThread(thread.id)}
-            className="group rounded-lg border border-border bg-card p-3 text-left transition-colors hover:bg-accent/40"
-            title={thread.title}
+            className="group rounded-lg border border-border bg-card p-3 text-left"
           >
             <div className="flex items-start justify-between gap-2">
-              <span className="line-clamp-2 text-xs font-medium leading-snug">
+              <button
+                type="button"
+                onClick={() => navigate.toThread(thread.id)}
+                className="line-clamp-2 text-left text-xs font-medium leading-snug hover:underline"
+                title={thread.title}
+              >
                 {thread.title}
-              </span>
+              </button>
               <span className="flex shrink-0 items-center gap-1">
                 {thread.hidden ? (
                   <span
@@ -768,7 +777,15 @@ function ThreadCards({ report }: { report: DayReport }) {
                 </span>
               ) : null}
             </div>
-          </button>
+            <button
+              type="button"
+              onClick={() => onFamily(thread.id)}
+              className="mt-3 text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
+              aria-label={`Explore family: ${thread.title}`}
+            >
+              Explore family
+            </button>
+          </div>
         );
       })}
       {cards.length === 0 ? (
@@ -1546,6 +1563,7 @@ function DayPage() {
   const [timezone, setTimezone] = useState(browserTimezone);
   const [day, setDay] = useState(() => previousDay(browserTimezone()));
   const [mode, setMode] = useState<"day" | "week" | "month">("day");
+  const [familyId, setFamilyId] = useState<string | null>(null);
   const [showAutomated, setShowAutomated] = useState(false);
   const [showRequests, setShowRequests] = useState(false);
   const [report, setReport] = useState<DayReport | null>(null);
@@ -1674,7 +1692,7 @@ function DayPage() {
   }, [mode, loadRange, refreshToken]);
 
   useEffect(() => {
-    if (!includesToday) return;
+    if (!includesToday || familyId !== null) return;
     const timer = setInterval(() => {
       if (mode === "day") {
         dayCache.current.delete(`${timezone}|${day}`);
@@ -1687,7 +1705,16 @@ function DayPage() {
       }
     }, 60_000);
     return () => clearInterval(timer);
-  }, [includesToday, mode, timezone, day, bounds, loadDay, loadRange]);
+  }, [
+    includesToday,
+    familyId,
+    mode,
+    timezone,
+    day,
+    bounds,
+    loadDay,
+    loadRange,
+  ]);
 
   const refresh = () => {
     dayCache.current.clear();
@@ -1795,6 +1822,15 @@ function DayPage() {
     }
     setTimeout(() => setCopyState("idle"), 2000);
   };
+
+  if (familyId !== null)
+    return (
+      <FamilyPage
+        threadId={familyId}
+        timezone={timezone}
+        onBack={() => setFamilyId(null)}
+      />
+    );
 
   return (
     <div className="h-full min-h-0 flex-1 overflow-y-auto">
@@ -2071,7 +2107,7 @@ function DayPage() {
                     time
                   </span>
                 </div>
-                <ThreadCards report={report} />
+                <ThreadCards report={report} onFamily={setFamilyId} />
               </section>
 
               <section className="mt-3 rounded-xl border border-border bg-card p-4">
