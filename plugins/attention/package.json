@@ -1,0 +1,50 @@
+{
+  "name": "bb-plugin-attention",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "bb": ">=0.46",
+    "bbPluginSdk": ">=0.6.49"
+  },
+  "bb": {
+    "name": "Attention",
+    "description": "A day timeline of agent turns, your inputs, and waiting questions across BB threads.",
+    "branding": {
+      "icon": "Clock"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "prettier --check \"*.ts\" \"*.tsx\" \"lib/**/*.ts\" \"README.md\" \"PLUGIN_OVERVIEW.md\" \"package.json\"",
+    "format": "prettier --write \"*.ts\" \"*.tsx\" \"lib/**/*.ts\" \"README.md\" \"PLUGIN_OVERVIEW.md\" \"package.json\""
+  },
+  "dependencies": {
+    "@radix-ui/react-checkbox": "^1.4.1",
+    "@radix-ui/react-dialog": "^1.3.1",
+    "@radix-ui/react-slot": "^1.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.6.49",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "hono": "^4.13.13",
+    "jsdom": "^30.1.3",
+    "prettier": "^3.9.6",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tailwind-merge": "^3.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.11"
+  }
+}

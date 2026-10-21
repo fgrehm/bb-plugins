@@ -52,6 +52,16 @@ Replaces the browser tab favicon with uploaded light/dark SVG artwork. Reacts to
 
 Diff-first asynchronous review workspaces inside a thread: snapshots uncommitted changes, individual commits, or committed branch diffs as immutable revisions, lets a reviewer select exact line ranges in the diff and anchor comments, carry unresolved comment threads forward to refreshed revisions, and send a batch of feedback to the agent in that same BB thread. The sidebar's Recent reviews page resumes each thread's latest saved review, with pending-comment counts and viewed-file progress.
 
+### [Attention](plugins/attention) - `attention`
+
+A day timeline of work with coding agents: one row per thread, bands for agent
+turns, markers for your own inputs, and bands for structured questions waiting
+on an answer, with running-turn concurrency and input density below. Reads BB's
+thread history through the public SDK and computes on demand; it does not read
+message bodies, tool arguments, or tool output. A turn is execution time, not
+useful work, and BB records no reading or focus. This experiment is not in the
+marketplace catalog; install from a local checkout to try it.
+
 ### [Rate Your Chat](plugins/rate-your-chat) - `rate-your-chat`
 
 Skippable whole-chat feedback offered after archiving. Stores usefulness, use case, notes, and recorded model/reasoning variations in local SQLite, with editing and JSON export. No feedback is sent to providers. This experiment is not in the marketplace catalog; install from a local checkout to try it.

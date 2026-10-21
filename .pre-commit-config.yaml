@@ -57,6 +57,31 @@ repos:
         stages: [pre-push]
         pass_filenames: false
 
+      - id: attention-typecheck
+        name: attention typecheck
+        entry: bash -c 'cd plugins/attention && pnpm run typecheck'
+        language: system
+        files: ^plugins/attention/
+        groups: [attention, typecheck]
+        pass_filenames: false
+
+      - id: attention-format
+        name: attention format
+        entry: bash -c 'cd plugins/attention && pnpm run lint'
+        language: system
+        files: ^plugins/attention/
+        groups: [attention, format]
+        pass_filenames: false
+
+      - id: attention-tests
+        name: attention tests
+        entry: bash -c 'cd plugins/attention && pnpm test'
+        language: system
+        files: ^plugins/attention/
+        groups: [attention, test]
+        stages: [pre-push]
+        pass_filenames: false
+
       - id: review-workspace-format
         name: review-workspace format
         entry: bash -c 'cd plugins/review-workspace && pnpm run lint'
