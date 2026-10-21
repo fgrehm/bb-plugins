@@ -18,6 +18,8 @@ you stepped in, and when an agent was waiting for your answer.
 - **Agent requests** with thread, wait, and outcome, collapsed until opened.
 - **Week and Month views** with a daily heatmap, daily rhythm, busiest days, and
   top threads; click a day to open its timeline.
+- **Estimated human time** for the day or range: interacting plus switching
+  time, with adjustable per-item assumptions saved locally.
 - Failed and interrupted turns, archived threads, and automated inputs are
   marked rather than blended in.
 
@@ -38,7 +40,8 @@ A turn is provider execution time, not useful work. "You" means a local caller
 without a sender thread, so the desktop UI and an external script look the same.
 BB records no reading or focus, so thread switches are changes between your
 recorded inputs, not changes in attention. Only structured agent requests, including approvals, are
-shown. Queued messages are timed at dispatch, and per-turn token history is not
+shown. The human-time figure is an assumption-based estimate, not measured
+attention. Queued messages are timed at dispatch, and per-turn token history is not
 retained. Archived threads are included; deleted threads are gone.
 
 ## Caching and limits

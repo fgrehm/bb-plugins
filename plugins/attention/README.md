@@ -29,6 +29,9 @@ score productivity, attention, or cognitive load.
 - **Week and Month reports**: switch the view to get a daily heatmap, a daily
   agent/input rhythm, the busiest days, and the top threads for the range.
   Click any day in the heatmap to jump to its timeline.
+- **Estimated human time**, for the day or the range: interacting time (inputs
+  and requests) plus switching time (recorded thread changes). The per-item
+  seconds are assumptions you can adjust, and they are saved locally.
 
 Click a thread name or card to open it.
 
@@ -77,6 +80,11 @@ time; the day view remains the place for full per-thread and per-request detail.
   message goes out, so the wait between typing and sending is not in history.
 - **Token and context history is not per turn.** BB keeps only the latest
   snapshot per thread, so this plugin does not show cost.
+- **The human-time estimate is a model, not a measurement.** It adds a fixed
+  handling time per input and request and a reorientation cost per recorded
+  thread change. Defaults are 20s, 60s, and 30s. It does not include reading
+  turns, waiting, or work outside BB, and it is not a measure of attention or
+  cognitive load.
 - **Deleted threads are gone.** Archived threads are included.
 
 ## Requirements

@@ -118,6 +118,12 @@ describe("attention panel", () => {
     expect(slot.queryByText("Your inputs")).not.toBe(null);
     expect(slot.queryByText("Which branch should this land on?")).toBe(null);
 
+    const estimate = slot.getByText("Estimated human time").closest("section");
+    expect(estimate?.textContent).toContain("~1 min");
+    const inputSlider = slot.getByLabelText("Seconds per input");
+    fireEvent.change(inputSlider, { target: { value: "60" } });
+    await waitFor(() => expect(estimate?.textContent).toContain("~2 min"));
+
     fireEvent.click(slot.getByText("Agent requests"));
     await waitFor(() =>
       expect(slot.queryByText("Which branch should this land on?")).not.toBe(

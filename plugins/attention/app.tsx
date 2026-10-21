@@ -15,6 +15,12 @@ import {
   weekdayLabels,
 } from "./lib/calendar.js";
 import {
+  clampAssumptions,
+  DEFAULT_ASSUMPTIONS,
+  estimateHumanTime,
+  type EstimateAssumptions,
+} from "./lib/estimate";
+import {
   activeDays,
   busiestWindows,
   dayNarrative,
@@ -42,6 +48,43 @@ const FALLBACK_TIMEZONES = [
 ];
 
 const MINUTE = 60_000;
+const ASSUMPTIONS_KEY = "bb-attention:assumptions:v1";
+
+function loadAssumptions(): EstimateAssumptions {
+  try {
+    const raw = localStorage.getItem(ASSUMPTIONS_KEY);
+    if (raw === null) return DEFAULT_ASSUMPTIONS;
+    const parsed = JSON.parse(raw) as Partial<EstimateAssumptions>;
+    const numberOr = (value: unknown, fallback: number) => {
+      const parsedValue = Number(value);
+      return Number.isFinite(parsedValue) ? parsedValue : fallback;
+    };
+    return clampAssumptions({
+      inputSeconds: numberOr(
+        parsed.inputSeconds,
+        DEFAULT_ASSUMPTIONS.inputSeconds,
+      ),
+      requestSeconds: numberOr(
+        parsed.requestSeconds,
+        DEFAULT_ASSUMPTIONS.requestSeconds,
+      ),
+      switchSeconds: numberOr(
+        parsed.switchSeconds,
+        DEFAULT_ASSUMPTIONS.switchSeconds,
+      ),
+    });
+  } catch {
+    return DEFAULT_ASSUMPTIONS;
+  }
+}
+
+function saveAssumptions(assumptions: EstimateAssumptions): void {
+  try {
+    localStorage.setItem(ASSUMPTIONS_KEY, JSON.stringify(assumptions));
+  } catch {
+    // Storage is optional; the estimates still work for this session.
+  }
+}
 
 function remember<T>(map: Map<string, T>, key: string, value: T, max: number) {
   if (map.size >= max) {
@@ -1001,6 +1044,103 @@ function DayPicker({
   );
 }
 
+function EstimateCard({
+  counts,
+  assumptions,
+  onChange,
+}: {
+  counts: { inputs: number; requests: number; switches: number };
+  assumptions: EstimateAssumptions;
+  onChange: (next: EstimateAssumptions) => void;
+}) {
+  const estimate = estimateHumanTime(counts, assumptions);
+  const set = (key: keyof EstimateAssumptions, value: string) => {
+    onChange(
+      clampAssumptions({
+        ...assumptions,
+        [key]: Number(value),
+      } as EstimateAssumptions),
+    );
+  };
+  const sliders: Array<{
+    key: keyof EstimateAssumptions;
+    label: string;
+    max: number;
+    step: number;
+  }> = [
+    { key: "inputSeconds", label: "Seconds per input", max: 120, step: 5 },
+    { key: "requestSeconds", label: "Seconds per request", max: 300, step: 15 },
+    {
+      key: "switchSeconds",
+      label: "Seconds per thread switch",
+      max: 300,
+      step: 15,
+    },
+  ];
+  const stats: Array<{ label: string; value: number }> = [
+    { label: "Inputs", value: counts.inputs },
+    { label: "Requests", value: counts.requests },
+    { label: "Switches", value: counts.switches },
+  ];
+  return (
+    <section className="mt-3 rounded-xl border border-border bg-card px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">
+            Estimated human time
+          </div>
+          <div className="mt-1 text-2xl font-semibold tabular-nums">
+            ~{duration(estimate.totalMs)}
+          </div>
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {duration(estimate.interactingMs)} interacting ·{" "}
+            {duration(estimate.switchingMs)} switching
+          </div>
+        </div>
+        <div className="flex gap-5 text-xs">
+          {stats.map((stat) => (
+            <div key={stat.label}>
+              <div className="text-muted-foreground">{stat.label}</div>
+              <div className="tabular-nums">{stat.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <details className="mt-3 text-xs">
+        <summary className="cursor-pointer text-muted-foreground">
+          Assumptions
+        </summary>
+        <div className="mt-2 grid gap-3 sm:grid-cols-3">
+          {sliders.map((slider) => (
+            <label key={slider.key} className="block">
+              <span className="flex items-baseline justify-between gap-2 text-muted-foreground">
+                <span>{slider.label}</span>
+                <span className="tabular-nums">{assumptions[slider.key]}s</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={slider.max}
+                step={slider.step}
+                value={assumptions[slider.key]}
+                onChange={(event) => set(slider.key, event.target.value)}
+                aria-label={slider.label}
+                className="mt-1 w-full"
+                style={{ accentColor: "var(--primary)" }}
+              />
+            </label>
+          ))}
+        </div>
+        <p className="mt-2 leading-relaxed text-muted-foreground">
+          A model, not a measurement: each input and request adds a fixed
+          handling time, and each recorded thread change adds a reorientation
+          cost. It excludes reading turns, waiting, and work outside BB.
+        </p>
+      </details>
+    </section>
+  );
+}
+
 function weekLabel(startDay: string, endDay: string): string {
   const start = new Date(`${startDay}T12:00:00.000Z`);
   const end = new Date(`${endDay}T12:00:00.000Z`);
@@ -1387,6 +1527,8 @@ function DayPage() {
   const [loading, setLoading] = useState(false);
   const [rangeLoading, setRangeLoading] = useState(false);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [assumptions, setAssumptions] =
+    useState<EstimateAssumptions>(loadAssumptions);
   const forceFresh = useRef(false);
   const dayCache = useRef(new Map<string, DayReport>());
   const rangeCache = useRef(new Map<string, RangeReport>());
@@ -1407,6 +1549,10 @@ function DayPage() {
       subthreads: order.filter((entry) => entry.depth > 0).length,
     };
   }, [report]);
+
+  useEffect(() => {
+    saveAssumptions(assumptions);
+  }, [assumptions]);
 
   const loadDay = useCallback(async () => {
     const id = dayRequest.current + 1;
@@ -1685,6 +1831,18 @@ function DayPage() {
             </div>
           )}
         </section>
+
+        {summary === undefined ? null : (
+          <EstimateCard
+            counts={{
+              inputs: summary.humanInputs,
+              requests: summary.questions,
+              switches: summary.threadTransitions,
+            }}
+            assumptions={assumptions}
+            onChange={setAssumptions}
+          />
+        )}
 
         {activeError === null ? null : (
           <p role="alert" className="mt-3 text-sm text-destructive">
