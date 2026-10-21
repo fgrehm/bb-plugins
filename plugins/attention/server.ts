@@ -281,8 +281,14 @@ async function listDays(
 ): Promise<ListDaysResult> {
   const timezone = isValidTimeZone(input.timezone) ? input.timezone : "UTC";
   const cacheKey = `${timezone}|${input.month}`;
+  const currentMonth = dayStringAt(Date.now(), timezone).slice(0, 7);
+  const cacheable = input.month !== currentMonth;
   const cached = daysCache.get(cacheKey);
-  if (cached !== undefined && Date.now() - cached.at < DAYS_CACHE_TTL_MS) {
+  if (
+    cacheable &&
+    cached !== undefined &&
+    Date.now() - cached.at < DAYS_CACHE_TTL_MS
+  ) {
     return { days: cached.days };
   }
 
@@ -309,7 +315,7 @@ async function listDays(
   );
 
   const sorted = [...days].sort();
-  daysCache.set(cacheKey, { at: Date.now(), days: sorted });
+  if (cacheable) daysCache.set(cacheKey, { at: Date.now(), days: sorted });
   return { days: sorted };
 }
 
