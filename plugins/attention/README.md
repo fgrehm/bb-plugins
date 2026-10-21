@@ -9,16 +9,19 @@ score productivity, attention, or cognitive load.
 
 ## What it shows
 
-- One row per thread that had activity that day.
-- A band for every turn the agent executed, with failed and interrupted turns
-  marked separately.
-- A tick for every input, split by who sent it: you, another agent, or BB
-  itself (a finished child thread, a delivered tool result).
-- A band for every structured question an agent asked, from opening to answer,
-  timeout, or dismissal.
-- Running-turn concurrency and your input density for the same day.
+- **The shape of the day**: a half-hour strip of agent activity, with your
+  inputs marked along its base.
+- **Threads on one clock**: one row per thread with turn bands, your input
+  ticks, and bands for structured requests waiting on an answer.
+- **Rhythm**: agent-minutes and your inputs per hour, on the same axis.
+- **Busiest recorded windows**: the half hours with the most of your inputs,
+  with agent time as the tie-break.
+- **Thread cards**: agent time, turns, inputs, and requests for the eight
+  busiest threads, each with a miniature timeline.
+- **Agent requests**: every structured ask from an agent, with thread, wait,
+  and outcome.
 
-Click a thread name to open it.
+Click a thread name or card to open it.
 
 ## What it reads
 
@@ -43,9 +46,10 @@ data stays in the BB server and is computed on demand.
   agent.
 - **Reading and focus are not recorded by BB.** Thread switches count changes
   between your recorded inputs, not changes in what you were looking at.
-- **Only structured questions count.** A question typed into an assistant reply
-  is invisible. Questions opened before the selected day and answered during it
-  are not shown.
+- **Only structured requests count.** Questions and approvals raised through an
+  interaction are recorded. A question typed into an assistant reply is
+  invisible, and a request opened before the selected day and answered during
+  it is not shown.
 - **Queued messages are timed at dispatch.** BB deletes the queue row when the
   message goes out, so the wait between typing and sending is not in history.
 - **Token and context history is not per turn.** BB keeps only the latest

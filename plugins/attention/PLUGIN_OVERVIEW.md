@@ -3,17 +3,18 @@ you stepped in, and when an agent was waiting for your answer.
 
 ## What you get
 
-- **One row per thread** that had activity that day, ordered by how long its
-  agents actually ran.
-- **Turn bands** showing agent execution, with failed and interrupted turns
-  marked separately.
-- **Input markers** split by who sent them: you, another agent, or BB itself
-  after a child thread finished.
-- **Question bands** showing when an agent asked for a decision and how long it
-  waited, including timeouts and dismissals.
-- **Two summary strips**: how many turns were running at once, and how dense
-  your own inputs were across the day.
-- A question table with thread, open time, wait, and outcome.
+- **The shape of the day**: a half-hour heat strip of agent activity with your
+  inputs along its base.
+- **One row per thread** on a single clock: turn bands, your input ticks, and
+  structured requests waiting for an answer.
+- **Rhythm**: agent-minutes and your inputs per hour on the same axis.
+- **Busiest recorded windows**: the half hours where you stepped in most, with
+  agent time as the tie-break.
+- **Thread cards** for the busiest eight, each with a miniature timeline and
+  agent time, turns, inputs, and requests.
+- **Agent requests** with thread, wait, and outcome.
+- Failed and interrupted turns, archived threads, and automated inputs are
+  marked rather than blended in.
 
 The page answers a narrow question: did parallel agents run on their own, or did
 they keep pulling you back in? It reports recorded activity, not a productivity
@@ -31,6 +32,6 @@ requests. Nothing leaves your machine.
 A turn is provider execution time, not useful work. "You" means a local caller
 without a sender thread, so the desktop UI and an external script look the same.
 BB records no reading or focus, so thread switches are changes between your
-recorded inputs, not changes in attention. Only structured agent questions are
+recorded inputs, not changes in attention. Only structured agent requests, including approvals, are
 shown. Queued messages are timed at dispatch, and per-turn token history is not
 retained. Archived threads are included; deleted threads are gone.
