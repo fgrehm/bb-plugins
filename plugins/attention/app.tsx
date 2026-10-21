@@ -553,7 +553,10 @@ function ThreadCards({ report }: { report: DayReport }) {
               <span>· {summary.turns} turns</span>
               <span>· {summary.inputs} inputs</span>
               {summary.questions > 0 ? (
-                <span>· {summary.questions} questions</span>
+                <span>
+                  · {summary.questions}{" "}
+                  {summary.questions === 1 ? "request" : "requests"}
+                </span>
               ) : null}
             </div>
           </button>
