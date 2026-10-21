@@ -15,8 +15,9 @@ score productivity, attention, or cognitive load.
   inputs marked along its base.
 - **Threads on one clock**: one row per thread with turn bands, your input
   ticks, a faint first-to-last activity span, and bands for structured requests
-  waiting on an answer. Subthreads are nested under their parent and can be
-  collapsed; a collapsed parent shows how much work its children hold. Each
+  waiting on an answer. Subthreads are nested under their parent and
+  collapsed by default; a collapsed parent shows how much work its children
+  hold, and expanding it reveals them. Each
   row carries agent time, turns, and your inputs.
 - **Rhythm**: agent-minutes and your inputs per hour, on the same axis.
 - **Busiest recorded windows**: the half hours with the most of your inputs,

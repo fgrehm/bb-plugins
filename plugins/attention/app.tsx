@@ -269,7 +269,21 @@ function Timeline({
     () => new Map(report.threads.map((thread) => [thread.id, thread])),
     [report],
   );
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const parentIds = useMemo(
+    () =>
+      order.filter((entry) => entry.childCount > 0).map((entry) => entry.id),
+    [order],
+  );
+  const [collapsed, setCollapsed] = useState<Set<string>>(
+    () => new Set(parentIds),
+  );
+  const dayKey = `${report.day}|${report.timezone}`;
+  const lastDayKey = useRef(dayKey);
+  useEffect(() => {
+    if (lastDayKey.current === dayKey) return;
+    lastDayKey.current = dayKey;
+    setCollapsed(new Set(parentIds));
+  }, [dayKey, parentIds]);
   const marks = hourMarks(report);
 
   const visible = order.filter((entry) => {

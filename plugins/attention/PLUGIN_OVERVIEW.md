@@ -8,7 +8,8 @@ you stepped in, and when an agent was waiting for your answer.
   inputs along its base.
 - **One row per thread** on a single clock: turn bands, your input ticks, an
   activity span, and structured requests waiting for an answer. Subthreads are
-  nested under their parent, collapsible, and included in every total.
+  nested under their parent, collapsed by default, and included in every
+  total.
 - **Rhythm**: agent-minutes and your inputs per hour on the same axis.
 - **Busiest recorded windows**: the half hours where you stepped in most, with
   agent time as the tie-break.
