@@ -3,11 +3,14 @@ import {
   rpcContract,
   type DayReport,
   type DayThread,
+  type ListDaysInput,
+  type ListDaysResult,
   type ReadDayInput,
 } from "./lib/contract.js";
 import {
   buildReport,
   dayBounds,
+  dayStringAt,
   isValidTimeZone,
   type RawEvent,
 } from "./lib/day.js";
@@ -24,6 +27,11 @@ const PAGE_SIZE = 100;
 const MAX_PAGES_PER_THREAD = 12;
 const MAX_THREADS = 80;
 const THREAD_LIST_LIMIT = 500;
+const MAX_DAY_SCAN_PAGES = 8;
+const DAY_SCAN_CONCURRENCY = 6;
+const DAYS_CACHE_TTL_MS = 5 * 60_000;
+
+const daysCache = new Map<string, { at: number; days: string[] }>();
 
 type ThreadRow = Awaited<
   ReturnType<BbPluginApi["sdk"]["threads"]["list"]>
@@ -209,11 +217,108 @@ async function readDay(
   });
 }
 
+function nextMonth(month: string): string {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const next = new Date(Date.UTC(year ?? 1970, monthNumber ?? 1, 1));
+  return `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+async function mapLimited<T>(
+  items: readonly T[],
+  limit: number,
+  run: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    async () => {
+      for (;;) {
+        const index = next;
+        next += 1;
+        const item = items[index];
+        if (item === undefined) return;
+        await run(item);
+      }
+    },
+  );
+  await Promise.all(workers);
+}
+
+async function scanThreadDays(
+  bb: BbPluginApi,
+  threadId: string,
+  monthStart: number,
+  monthEnd: number,
+  timezone: string,
+  days: Set<string>,
+): Promise<void> {
+  let beforeSeq: string | undefined;
+  for (let page = 0; page < MAX_DAY_SCAN_PAGES; page += 1) {
+    const rows = await bb.sdk.threads.events.list({
+      threadId,
+      types: ["turn/started"],
+      limit: String(PAGE_SIZE),
+      order: "desc",
+      ...(beforeSeq === undefined ? {} : { beforeSeq }),
+    });
+    if (rows.length === 0) return;
+    let oldest: EventRow | undefined;
+    for (const row of rows) {
+      if (oldest === undefined || row.seq < oldest.seq) oldest = row;
+      if (row.createdAt >= monthStart && row.createdAt < monthEnd) {
+        days.add(dayStringAt(row.createdAt, timezone));
+      }
+    }
+    if (oldest === undefined || oldest.createdAt < monthStart) return;
+    if (rows.length < PAGE_SIZE) return;
+    beforeSeq = String(oldest.seq);
+  }
+}
+
+async function listDays(
+  bb: BbPluginApi,
+  input: ListDaysInput,
+): Promise<ListDaysResult> {
+  const timezone = isValidTimeZone(input.timezone) ? input.timezone : "UTC";
+  const cacheKey = `${timezone}|${input.month}`;
+  const cached = daysCache.get(cacheKey);
+  if (cached !== undefined && Date.now() - cached.at < DAYS_CACHE_TTL_MS) {
+    return { days: cached.days };
+  }
+
+  const { start: monthStart } = dayBounds(`${input.month}-01`, timezone);
+  const { start: monthEnd } = dayBounds(
+    `${nextMonth(input.month)}-01`,
+    timezone,
+  );
+
+  const listed = await bb.sdk.threads.list({
+    includeHidden: true,
+    limit: THREAD_LIST_LIMIT,
+  });
+  const candidates = listed.filter(
+    (thread) =>
+      thread.deletedAt === null &&
+      thread.updatedAt >= monthStart &&
+      thread.createdAt < monthEnd,
+  );
+
+  const days = new Set<string>();
+  await mapLimited(candidates, DAY_SCAN_CONCURRENCY, (thread) =>
+    scanThreadDays(bb, thread.id, monthStart, monthEnd, timezone, days),
+  );
+
+  const sorted = [...days].sort();
+  daysCache.set(cacheKey, { at: Date.now(), days: sorted });
+  return { days: sorted };
+}
+
 export default async function plugin(bb: BbPluginApi) {
   bb.log.info("attention: loaded");
 
   bb.rpc.register(rpcContract, {
     read_day: (input) => readDay(bb, input),
+    list_days: (input) => listDays(bb, input),
   });
 
   bb.onDispose(() => {

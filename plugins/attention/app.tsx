@@ -2,7 +2,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { definePluginApp, useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import type { DayReport, DayThread } from "./lib/contract";
 import type { rpcContract } from "./lib/contract";
-import { previousDay } from "./lib/day";
+import { dayStringAt, previousDay } from "./lib/day";
+import {
+  dayLabel,
+  monthGrid,
+  monthOf,
+  monthTitle,
+  shiftMonth,
+  weekdayLabels,
+} from "./lib/calendar.js";
 import {
   busiestWindows,
   dayNarrative,
@@ -12,7 +20,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Icon } from "@/components/ui/icon";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 const FALLBACK_TIMEZONES = [
@@ -679,12 +686,183 @@ function Questions({ report }: { report: DayReport }) {
   );
 }
 
+function DayPicker({
+  value,
+  timezone,
+  onChange,
+}: {
+  value: string;
+  timezone: string;
+  onChange: (day: string) => void;
+}) {
+  const rpc = useRpc<typeof rpcContract>();
+  const [open, setOpen] = useState(false);
+  const [month, setMonth] = useState(() => monthOf(value));
+  const [days, setDays] = useState<Set<string> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const cache = useRef(new Map<string, string[]>());
+  const wrapper = useRef<HTMLDivElement>(null);
+  const today = dayStringAt(Date.now(), timezone);
+  const currentMonth = monthOf(today);
+
+  useEffect(() => {
+    if (!open) setMonth(monthOf(value));
+  }, [open, value]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    const cached = cache.current.get(`${month}|${timezone}`);
+    if (cached !== undefined) {
+      setDays(new Set(cached));
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    rpc
+      .call("list_days", { month, timezone })
+      .then((result) => {
+        cache.current.set(`${month}|${timezone}`, result.days);
+        if (!cancelled) setDays(new Set(result.days));
+      })
+      .catch(() => {
+        if (!cancelled) setDays(new Set());
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, month, timezone, rpc]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!wrapper.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const grid = useMemo(() => monthGrid(month), [month]);
+
+  return (
+    <div className="relative" ref={wrapper}>
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`Choose day, ${dayLabel(value)}`}
+        className="flex h-9 w-44 items-center justify-between gap-2 rounded-md border border-input px-2 text-sm"
+      >
+        <span className="tabular-nums">{dayLabel(value)}</span>
+        <Icon
+          name="ChevronDown"
+          className={cn(
+            "size-3.5 text-muted-foreground transition-transform",
+            open && "rotate-180",
+          )}
+        />
+      </button>
+      {open ? (
+        <div
+          role="dialog"
+          aria-label="Choose a day with activity"
+          className="absolute left-0 z-50 mt-1 w-72 rounded-lg border border-border bg-card p-2 shadow-xl"
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label="Previous month"
+              onClick={() => setMonth((current) => shiftMonth(current, -1))}
+              disabled={loading}
+            >
+              <Icon name="ChevronLeft" className="size-4" />
+            </Button>
+            <span className="text-xs font-medium">{monthTitle(month)}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              aria-label="Next month"
+              onClick={() => setMonth((current) => shiftMonth(current, 1))}
+              disabled={loading || month >= currentMonth}
+            >
+              <Icon name="ChevronRight" className="size-4" />
+            </Button>
+          </div>
+          <div className="grid grid-cols-7 text-center text-xs text-muted-foreground">
+            {weekdayLabels().map((weekday) => (
+              <span key={weekday} className="py-1">
+                {weekday.slice(0, 2)}
+              </span>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-0.5">
+            {grid.map((day, index) => {
+              if (day === null) {
+                return <span key={`blank-${index}`} />;
+              }
+              const unavailable =
+                loading || days === null || !days.has(day) || day > today;
+              return (
+                <button
+                  key={day}
+                  type="button"
+                  disabled={unavailable}
+                  onClick={() => {
+                    onChange(day);
+                    setOpen(false);
+                  }}
+                  aria-label={dayLabel(day)}
+                  aria-current={day === value ? "date" : undefined}
+                  className={cn(
+                    "size-8 rounded-md text-xs tabular-nums transition-colors",
+                    day === value
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-accent",
+                    unavailable &&
+                      "cursor-not-allowed opacity-25 hover:bg-transparent",
+                  )}
+                >
+                  {Number(day.slice(8))}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {loading
+              ? "Loading days with activity…"
+              : `${days?.size ?? 0} ${
+                  (days?.size ?? 0) === 1 ? "day" : "days"
+                } with activity`}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function DayPage() {
   const rpc = useRpc<typeof rpcContract>();
   const timezones = useMemo(timezoneOptions, []);
   const [timezone, setTimezone] = useState(browserTimezone);
   const [day, setDay] = useState(() => previousDay(browserTimezone()));
   const [showAutomated, setShowAutomated] = useState(false);
+  const [showRequests, setShowRequests] = useState(false);
   const [report, setReport] = useState<DayReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -714,7 +892,7 @@ function DayPage() {
   return (
     <div className="h-full min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto box-border w-full max-w-6xl px-4 pb-10 pt-3 md:px-6 md:pt-4">
-        <section className="overflow-hidden rounded-xl border border-border bg-card">
+        <section className="rounded-xl border border-border bg-card">
           <div className="border-b border-border px-4 py-4 md:px-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
@@ -731,18 +909,16 @@ function DayPage() {
                 </p>
               </div>
               <div className="flex flex-wrap items-end gap-2">
-                <label className="text-xs text-muted-foreground">
+                <div className="text-xs text-muted-foreground">
                   Day
-                  <Input
-                    type="date"
-                    value={day}
-                    onChange={(event) => {
-                      if (event.target.value !== "") setDay(event.target.value);
-                    }}
-                    className="mt-0.5 w-40"
-                    aria-label="Day"
-                  />
-                </label>
+                  <div className="mt-0.5">
+                    <DayPicker
+                      value={day}
+                      timezone={timezone}
+                      onChange={setDay}
+                    />
+                  </div>
+                </div>
                 <label className="text-xs text-muted-foreground">
                   Timezone
                   <select
@@ -882,14 +1058,30 @@ function DayPage() {
             </section>
 
             <section className="mt-3 rounded-xl border border-border bg-card p-4">
-              <div className="mb-3 flex items-baseline justify-between gap-2">
-                <h2 className="text-sm font-medium">Agent requests</h2>
-                <span className="text-xs text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => setShowRequests((current) => !current)}
+                aria-expanded={showRequests}
+                className="flex w-full items-center justify-between gap-2 text-left"
+              >
+                <span className="text-sm font-medium">Agent requests</span>
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
                   {report.summary.questions} made ·{" "}
                   {report.summary.answeredQuestions} resolved
+                  <Icon
+                    name="ChevronDown"
+                    className={cn(
+                      "size-3.5 transition-transform",
+                      showRequests && "rotate-180",
+                    )}
+                  />
                 </span>
-              </div>
-              <Questions report={report} />
+              </button>
+              {showRequests ? (
+                <div className="mt-3">
+                  <Questions report={report} />
+                </div>
+              ) : null}
             </section>
 
             <p className="mt-4 text-xs leading-relaxed text-muted-foreground">

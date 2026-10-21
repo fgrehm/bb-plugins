@@ -9,6 +9,8 @@ score productivity, attention, or cognitive load.
 
 ## What it shows
 
+- **A day picker that only enables days with recorded activity**, so empty dates
+  cannot be selected by accident.
 - **The shape of the day**: a half-hour strip of agent activity, with your
   inputs marked along its base.
 - **Threads on one clock**: one row per thread with turn bands, your input
@@ -19,7 +21,7 @@ score productivity, attention, or cognitive load.
 - **Thread cards**: agent time, turns, inputs, and requests for the eight
   busiest threads, each with a miniature timeline.
 - **Agent requests**: every structured ask from an agent, with thread, wait,
-  and outcome.
+  and outcome. Collapsed until you open it.
 
 Click a thread name or card to open it.
 

@@ -3,6 +3,7 @@ you stepped in, and when an agent was waiting for your answer.
 
 ## What you get
 
+- **A day picker that only enables days with recorded activity.**
 - **The shape of the day**: a half-hour heat strip of agent activity with your
   inputs along its base.
 - **One row per thread** on a single clock: turn bands, your input ticks, and
@@ -12,7 +13,7 @@ you stepped in, and when an agent was waiting for your answer.
   agent time as the tie-break.
 - **Thread cards** for the busiest eight, each with a miniature timeline and
   agent time, turns, inputs, and requests.
-- **Agent requests** with thread, wait, and outcome.
+- **Agent requests** with thread, wait, and outcome, collapsed until opened.
 - Failed and interrupted turns, archived threads, and automated inputs are
   marked rather than blended in.
 

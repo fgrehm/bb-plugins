@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type { rpcContract } from "./lib/contract";
 import { buildReport, type RawEvent } from "./lib/day";
@@ -87,7 +87,7 @@ describe("attention panel", () => {
     const slot = renderSlot<{ subPath: string }, typeof rpcContract>(
       panel,
       { subPath: "" },
-      { rpc: { read_day: () => report } },
+      { rpc: { read_day: () => report, list_days: () => ({ days: [DAY] }) } },
     );
 
     await waitFor(() =>
@@ -96,10 +96,26 @@ describe("attention panel", () => {
     expect(
       slot.queryAllByText("Ship the attention page").length,
     ).toBeGreaterThan(0);
-    expect(slot.queryByText("Which branch should this land on?")).not.toBe(
-      null,
-    );
     expect(slot.queryByText("Your inputs")).not.toBe(null);
+    expect(slot.queryByText("Which branch should this land on?")).toBe(null);
+
+    fireEvent.click(slot.getByText("Agent requests"));
+    await waitFor(() =>
+      expect(slot.queryByText("Which branch should this land on?")).not.toBe(
+        null,
+      ),
+    );
+
+    fireEvent.click(slot.getByLabelText(/^Choose day,/));
+    await waitFor(() =>
+      expect(slot.getByText("1 day with activity")).not.toBe(null),
+    );
+    expect(
+      (slot.getByLabelText("Mon, 19 Oct 2026") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (slot.getByLabelText("Tue, 20 Oct 2026") as HTMLButtonElement).disabled,
+    ).toBe(false);
     expect(slot.inspection.rpcCalls.map((call) => call.method)).toContain(
       "read_day",
     );
@@ -119,7 +135,7 @@ describe("attention panel", () => {
     const slot = renderSlot<{ subPath: string }, typeof rpcContract>(
       app.navPanels[0]!,
       { subPath: "" },
-      { rpc: { read_day: () => empty } },
+      { rpc: { read_day: () => empty, list_days: () => ({ days: [] }) } },
     );
     await waitFor(() =>
       expect(

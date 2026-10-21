@@ -117,9 +117,24 @@ export const readDayInputSchema = z.object({
 });
 export type ReadDayInput = z.infer<typeof readDayInputSchema>;
 
+export const listDaysInputSchema = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/, "Expected YYYY-MM"),
+  timezone: z.string().min(1).max(64),
+});
+export type ListDaysInput = z.infer<typeof listDaysInputSchema>;
+
+export const listDaysResultSchema = z.object({
+  days: z.array(z.string()),
+});
+export type ListDaysResult = z.infer<typeof listDaysResultSchema>;
+
 export const rpcContract = defineRpcContract({
   read_day: {
     input: readDayInputSchema,
     output: dayReportSchema,
+  },
+  list_days: {
+    input: listDaysInputSchema,
+    output: listDaysResultSchema,
   },
 });
