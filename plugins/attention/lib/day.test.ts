@@ -20,6 +20,7 @@ function thread(id: string, title: string): DayThread {
     providerId: "pi",
     parentThreadId: null,
     archived: false,
+    hidden: false,
     createdAt: 0,
   };
 }
@@ -172,6 +173,42 @@ describe("buildReport", () => {
       (input) => input.threadId === "thr_a" && input.kind === "steer",
     );
     expect(steer?.queueDelayMs).toBe(500);
+  });
+
+  it("includes a question opened before the window and keeps its full wait", () => {
+    const events: RawEvent[] = [
+      {
+        kind: "question",
+        at: at(0) - 2 * 3_600_000,
+        threadId: "thr_a",
+        interactionId: "q_early",
+        status: "pending",
+        title: "Before midnight",
+        resolutionKind: null,
+        statusReason: null,
+      },
+      {
+        kind: "question",
+        at: at(0, 30),
+        threadId: "thr_a",
+        interactionId: "q_early",
+        status: "resolved",
+        title: "Before midnight",
+        resolutionKind: "plugin_submitted",
+        statusReason: null,
+      },
+    ];
+    const partial = buildReport({
+      day: DAY,
+      timezone: "UTC",
+      threads: [A],
+      events,
+      truncatedThreads: [],
+      includeBins: false,
+    });
+    const question = partial.questions.find((item) => item.id === "q_early");
+    expect(question?.opened).toBe(at(0));
+    expect(question?.waitMs).toBe(2 * 3_600_000 + 30 * 60_000);
   });
 
   it("derives question outcomes and waits", () => {

@@ -29,6 +29,7 @@ export const dayThreadSchema = z.object({
   providerId: z.string(),
   parentThreadId: z.string().nullable(),
   archived: z.boolean(),
+  hidden: z.boolean(),
   createdAt: z.number(),
 });
 export type DayThread = z.infer<typeof dayThreadSchema>;

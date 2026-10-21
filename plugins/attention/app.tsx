@@ -11,6 +11,7 @@ import {
   monthRange,
   monthTitle,
   shiftMonth,
+  shiftPeriod,
   weekRange,
   weekdayLabels,
 } from "./lib/calendar.js";
@@ -20,6 +21,7 @@ import {
   estimateHumanTime,
   type EstimateAssumptions,
 } from "./lib/estimate";
+import { summaryMarkdown } from "./lib/export";
 import {
   activeDays,
   busiestWindows,
@@ -465,6 +467,14 @@ function Timeline({
                         className="size-3 shrink-0 opacity-70"
                       />
                     ) : null}
+                    {thread.hidden ? (
+                      <span
+                        title="Hidden thread"
+                        className="shrink-0 rounded border border-border px-1 text-xs uppercase tracking-wide text-muted-foreground"
+                      >
+                        hidden
+                      </span>
+                    ) : null}
                     <span className="truncate">{thread.title}</span>
                   </span>
                   <span className="block truncate text-xs tabular-nums text-muted-foreground/80">
@@ -703,12 +713,22 @@ function ThreadCards({ report }: { report: DayReport }) {
               <span className="line-clamp-2 text-xs font-medium leading-snug">
                 {thread.title}
               </span>
-              {thread.archived ? (
-                <Icon
-                  name="Archive"
-                  className="mt-0.5 size-3 shrink-0 text-muted-foreground"
-                />
-              ) : null}
+              <span className="flex shrink-0 items-center gap-1">
+                {thread.hidden ? (
+                  <span
+                    title="Hidden thread"
+                    className="rounded border border-border px-1 text-xs uppercase tracking-wide text-muted-foreground"
+                  >
+                    hidden
+                  </span>
+                ) : null}
+                {thread.archived ? (
+                  <Icon
+                    name="Archive"
+                    className="mt-0.5 size-3 text-muted-foreground"
+                  />
+                ) : null}
+              </span>
             </div>
             <div
               className="relative mt-2 h-5 overflow-hidden rounded-sm"
@@ -1422,6 +1442,14 @@ function RangeThreads({ range }: { range: RangeReport }) {
                   className="size-3 shrink-0 text-muted-foreground"
                 />
               ) : null}
+              {entry.thread.hidden ? (
+                <span
+                  title="Hidden thread"
+                  className="shrink-0 rounded border border-border px-1 text-xs uppercase tracking-wide text-muted-foreground"
+                >
+                  hidden
+                </span>
+              ) : null}
               <span className="truncate">{entry.thread.title}</span>
             </span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
@@ -1529,6 +1557,9 @@ function DayPage() {
   const [refreshToken, setRefreshToken] = useState(0);
   const [assumptions, setAssumptions] =
     useState<EstimateAssumptions>(loadAssumptions);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">(
+    "idle",
+  );
   const forceFresh = useRef(false);
   const dayCache = useRef(new Map<string, DayReport>());
   const rangeCache = useRef(new Map<string, RangeReport>());
@@ -1540,6 +1571,14 @@ function DayPage() {
     if (mode === "month") return monthRange(day);
     return null;
   }, [mode, day]);
+
+  const today = dayStringAt(Date.now(), timezone);
+  const canGoNext =
+    mode === "day" ? day < today : bounds !== null && bounds.endDay < today;
+  const includesToday =
+    mode === "day"
+      ? day === today
+      : bounds !== null && bounds.startDay <= today && bounds.endDay >= today;
 
   const threadCounts = useMemo(() => {
     if (report === null) return null;
@@ -1634,6 +1673,22 @@ function DayPage() {
     void loadRange();
   }, [mode, loadRange, refreshToken]);
 
+  useEffect(() => {
+    if (!includesToday) return;
+    const timer = setInterval(() => {
+      if (mode === "day") {
+        dayCache.current.delete(`${timezone}|${day}`);
+        void loadDay();
+      } else if (bounds !== null) {
+        rangeCache.current.delete(
+          `${timezone}|${bounds.startDay}|${bounds.endDay}`,
+        );
+        void loadRange();
+      }
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [includesToday, mode, timezone, day, bounds, loadDay, loadRange]);
+
   const refresh = () => {
     dayCache.current.clear();
     rangeCache.current.clear();
@@ -1683,6 +1738,64 @@ function DayPage() {
   const active = mode === "day" ? loading : rangeLoading;
   const activeError = mode === "day" ? error : rangeError;
 
+  const copySummary = async () => {
+    if (summary === undefined) return;
+    const threads =
+      mode === "day"
+        ? currentReport === null
+          ? []
+          : (() => {
+              const titles = new Map(
+                currentReport.threads.map((thread) => [
+                  thread.id,
+                  thread.title,
+                ]),
+              );
+              return threadSummaries(currentReport)
+                .slice(0, 5)
+                .map((entry) => ({
+                  title: titles.get(entry.id) ?? entry.id,
+                  agentMs: entry.agentMs,
+                  turns: entry.turns,
+                  inputs: entry.inputs,
+                }));
+            })()
+        : (currentRange?.threads.slice(0, 5).map((entry) => ({
+            title: entry.thread.title,
+            agentMs: entry.agentMs,
+            turns: entry.turns,
+            inputs: entry.inputs,
+          })) ?? []);
+    const estimate = estimateHumanTime(
+      {
+        inputs: summary.humanInputs,
+        requests: summary.questions,
+        switches: summary.threadTransitions,
+      },
+      assumptions,
+    );
+    const coverage =
+      mode === "day" ? currentReport?.coverage : currentRange?.coverage;
+    const markdown = summaryMarkdown({
+      title,
+      narrative,
+      summary,
+      estimate,
+      assumptions,
+      threads,
+      timezone,
+      threadsScanned: coverage?.threadsScanned ?? 0,
+      eventsRead: coverage?.eventsRead ?? 0,
+    });
+    try {
+      await navigator.clipboard.writeText(markdown);
+      setCopyState("copied");
+    } catch {
+      setCopyState("error");
+    }
+    setTimeout(() => setCopyState("idle"), 2000);
+  };
+
   return (
     <div className="h-full min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto box-border w-full max-w-6xl px-4 pb-10 pt-3 md:px-6 md:pt-4">
@@ -1699,23 +1812,46 @@ function DayPage() {
                 <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
                   {narrative}
                 </p>
-                <div className="mt-3 inline-flex rounded-md border border-border p-0.5">
-                  {modeLabels.map((entry) => (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      onClick={() => setMode(entry.id)}
-                      aria-pressed={mode === entry.id}
-                      className={cn(
-                        "rounded px-2.5 py-1 text-xs transition-colors",
-                        mode === entry.id
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:bg-accent",
-                      )}
-                    >
-                      {entry.label}
-                    </button>
-                  ))}
+                <div className="mt-3 flex flex-wrap items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label="Previous period"
+                    onClick={() => setDay(shiftPeriod(day, mode, -1))}
+                  >
+                    <Icon name="ChevronLeft" className="size-4" />
+                  </Button>
+                  <div className="inline-flex rounded-md border border-border p-0.5">
+                    {modeLabels.map((entry) => (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        onClick={() => setMode(entry.id)}
+                        aria-pressed={mode === entry.id}
+                        className={cn(
+                          "rounded px-2.5 py-1 text-xs transition-colors",
+                          mode === entry.id
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:bg-accent",
+                        )}
+                      >
+                        {entry.label}
+                      </button>
+                    ))}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8"
+                    aria-label="Next period"
+                    disabled={!canGoNext}
+                    onClick={() => setDay(shiftPeriod(day, mode, 1))}
+                  >
+                    <Icon name="ChevronRight" className="size-4" />
+                  </Button>
                 </div>
               </div>
               <div className="flex flex-wrap items-end gap-2">
@@ -1747,6 +1883,31 @@ function DayPage() {
                     ))}
                   </select>
                 </label>
+                {includesToday ? (
+                  <span
+                    title="Refreshes every minute while this period includes today"
+                    className="flex items-center gap-1 pb-2 text-xs text-muted-foreground"
+                  >
+                    <span
+                      className="inline-block size-1.5 rounded-full"
+                      style={{ background: "var(--success)" }}
+                    />
+                    auto 60s
+                  </span>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void copySummary()}
+                  disabled={summary === undefined}
+                >
+                  <Icon name="Copy" className="mr-1 size-3.5" />
+                  {copyState === "copied"
+                    ? "Copied"
+                    : copyState === "error"
+                      ? "Copy failed"
+                      : "Copy summary"}
+                </Button>
                 <Button
                   type="button"
                   variant="secondary"

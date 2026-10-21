@@ -38,6 +38,8 @@ const REPORT_CACHE_MAX = 40;
 const MAX_RANGE_DAYS = 62;
 const MAX_RANGE_THREADS = 250;
 const RANGE_EVENT_PAGES = 30;
+const QUESTION_LOOKBACK_MS = 7 * 86_400_000;
+const QUESTION_LOOKBACK_PAGES = 3;
 
 const daysCache = new Map<string, { at: number; days: string[] }>();
 const reportCache = new Map<string, { at: number; value: DayReport }>();
@@ -87,6 +89,7 @@ function toDayThread(thread: ThreadRow): DayThread {
     providerId: thread.providerId,
     parentThreadId: thread.parentThreadId,
     archived: thread.archivedAt !== null,
+    hidden: thread.visibility !== "visible",
     createdAt: thread.createdAt,
   };
 }
@@ -174,6 +177,7 @@ function mapRow(row: EventRow): RawEvent | null {
             ? interaction.resolution.kind
             : null,
         statusReason: interaction.statusReason,
+        seq: row.seq,
       };
     }
     default:
@@ -217,6 +221,86 @@ async function readThreadEvents(
   return { events: [...seen.values()], truncated: true };
 }
 
+async function addQuestionLookback(
+  bb: BbPluginApi,
+  events: RawEvent[],
+  windowStart: number,
+): Promise<void> {
+  const byThread = new Map<string, RawEvent[]>();
+  for (const event of events) {
+    if (event.kind !== "question") continue;
+    const list = byThread.get(event.threadId) ?? [];
+    list.push(event);
+    byThread.set(event.threadId, list);
+  }
+
+  for (const [threadId, threadEvents] of byThread) {
+    const opened = new Set<string>();
+    const closed = new Set<string>();
+    for (const event of threadEvents) {
+      if (event.kind !== "question") continue;
+      if (event.status === "pending" || event.status === "resolving") {
+        opened.add(event.interactionId);
+      } else {
+        closed.add(event.interactionId);
+      }
+    }
+    const missing = new Set(
+      [...closed].filter((interactionId) => !opened.has(interactionId)),
+    );
+    if (missing.size === 0) continue;
+
+    const sequences = threadEvents.flatMap((event) =>
+      event.kind === "question" && event.seq !== undefined ? [event.seq] : [],
+    );
+    let beforeSeq =
+      sequences.length === 0 ? undefined : String(Math.min(...sequences));
+    const floor = windowStart - QUESTION_LOOKBACK_MS;
+    for (
+      let page = 0;
+      page < QUESTION_LOOKBACK_PAGES && missing.size > 0;
+      page += 1
+    ) {
+      const rows = await bb.sdk.threads.events.list({
+        threadId,
+        types: ["system/interaction/lifecycle"],
+        limit: String(PAGE_SIZE),
+        order: "desc",
+        ...(beforeSeq === undefined ? {} : { beforeSeq }),
+      });
+      if (rows.length === 0) break;
+      let oldest: EventRow | undefined;
+      for (const row of rows) {
+        if (oldest === undefined || row.seq < oldest.seq) oldest = row;
+        if (row.type !== "system/interaction/lifecycle") continue;
+        const interaction = row.data.interaction;
+        if (!missing.has(interaction.id)) continue;
+        if (
+          interaction.status !== "pending" &&
+          interaction.status !== "resolving"
+        ) {
+          continue;
+        }
+        events.push({
+          kind: "question",
+          at: row.createdAt,
+          threadId,
+          interactionId: interaction.id,
+          status: interaction.status,
+          title: interactionTitle(interaction.payload),
+          resolutionKind: null,
+          statusReason: interaction.statusReason,
+          seq: row.seq,
+        });
+        missing.delete(interaction.id);
+      }
+      if (oldest === undefined || oldest.createdAt < floor) break;
+      if (rows.length < PAGE_SIZE) break;
+      beforeSeq = String(oldest.seq);
+    }
+  }
+}
+
 async function computeDay(
   bb: BbPluginApi,
   input: ReadDayInput,
@@ -247,6 +331,7 @@ async function computeDay(
     if (result.truncated) truncatedThreads.push(thread.id);
     events.push(...result.events);
   }
+  await addQuestionLookback(bb, events, start);
 
   return buildReport({
     day: input.day,
@@ -436,6 +521,7 @@ async function computeRange(
     if (result.truncated) truncatedThreads.push(thread.id);
     events.push(...result.events);
   }
+  await addQuestionLookback(bb, events, start);
 
   const threadRows = candidates.map(toDayThread);
   const dayReports = days.map((day) =>

@@ -45,6 +45,7 @@ export type RawEvent =
       title: string;
       resolutionKind: string | null;
       statusReason: string | null;
+      seq?: number;
     };
 
 export interface BuildReportArgs {
@@ -319,10 +320,10 @@ export function buildReport(args: BuildReportArgs): DayReport {
       title: entry.title,
       outcome: bounded ? "open" : entry.outcome,
       waitMs: bounded
-        ? dayEnd - opened
+        ? dayEnd - entry.opened
         : resolved === null
-          ? dayEnd - opened
-          : resolved - opened,
+          ? dayEnd - entry.opened
+          : resolved - entry.opened,
     });
   }
   questions.sort((a, b) => a.opened - b.opened);

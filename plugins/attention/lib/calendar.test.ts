@@ -8,6 +8,7 @@ import {
   monthRange,
   monthTitle,
   shiftMonth,
+  shiftPeriod,
   weekRange,
 } from "./calendar.js";
 
@@ -41,6 +42,13 @@ describe("calendar helpers", () => {
       startDay: "2026-10-01",
       endDay: "2026-10-31",
     });
+  });
+
+  it("shifts a period and clamps short months", () => {
+    expect(shiftPeriod("2026-10-20", "day", 1)).toBe("2026-10-21");
+    expect(shiftPeriod("2026-10-20", "week", -1)).toBe("2026-10-13");
+    expect(shiftPeriod("2026-01-31", "month", 1)).toBe("2026-02-28");
+    expect(shiftPeriod("2026-03-31", "month", -1)).toBe("2026-02-28");
   });
 
   it("formats month, day, and titles", () => {

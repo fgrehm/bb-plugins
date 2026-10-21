@@ -22,6 +22,7 @@ const thread = (id: string): DayThread => ({
   providerId: "pi",
   parentThreadId: null,
   archived: false,
+  hidden: false,
   createdAt: 0,
 });
 

@@ -20,6 +20,7 @@ const thread: DayThread = {
   providerId: "pi",
   parentThreadId: null,
   archived: false,
+  hidden: false,
   createdAt: at(8),
 };
 

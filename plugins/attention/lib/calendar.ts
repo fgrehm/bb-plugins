@@ -107,3 +107,21 @@ export function monthRange(day: string): { startDay: string; endDay: string } {
     endDay: `${month}-${pad(last.getUTCDate())}`,
   };
 }
+
+export function shiftPeriod(
+  day: string,
+  mode: "day" | "week" | "month",
+  delta: number,
+): string {
+  if (mode === "day") return addDays(day, delta);
+  if (mode === "week") return addDays(day, delta * 7);
+  const { year, monthIndex } = splitMonth(monthOf(day));
+  const target = new Date(Date.UTC(year, monthIndex + delta, 1));
+  const daysInTarget = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  const dayOfMonth = Math.min(Number(day.slice(8)), daysInTarget);
+  return `${target.getUTCFullYear()}-${pad(target.getUTCMonth() + 1)}-${pad(
+    dayOfMonth,
+  )}`;
+}
