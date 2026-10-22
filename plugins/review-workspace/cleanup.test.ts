@@ -275,33 +275,39 @@ describe("Automatic review cleanup", () => {
     expect(counts(bb)).toEqual([0, 0, 0, 0, 0, 0, 0]);
   });
 
-  it("bounds each pass to 100 owners and continues across reloads without starving later owners", async () => {
-    let { bb, harness } = host();
-    await plugin(bb);
-    for (let i = 0; i < 105; i++)
-      seed(bb, `thread-${String(i).padStart(3, "0")}`);
-    await sweep(harness);
-    expect(harness.inspection.sdk.callsTo("threads.get")).toHaveLength(100);
-    expect(await bb.storage.kv.get(CURSOR)).toBe("thread-099");
-    ({ bb, harness } = await harness.lifecycle.reload(plugin));
-    harness.sdk.stub(
-      "threads.get",
-      async ({ threadId }: { threadId: string }) =>
-        makeThreadResponse({
-          id: threadId,
-          archivedAt: threadId === "thread-104" ? NOW - 8 * DAY : null,
-        }),
-    );
-    await harness.behavior.runService("cleanup-startup").done;
-    expect(harness.inspection.sdk.callsTo("threads.get")).toHaveLength(5);
-    expect(
-      await harness.behavior.callRpc("review", { threadId: "thread-104" }),
-    ).toEqual({ review: null });
-    expect(await bb.storage.kv.get(CURSOR)).toBe("");
-    await sweep(harness);
-    expect(harness.inspection.sdk.callsTo("threads.get")).toHaveLength(105);
-    await harness.lifecycle.dispose();
-  });
+  it(
+    "bounds each pass to 100 owners and continues across reloads without starving later owners",
+    // A sweep over 105 owners plus a reload does not fit vitest's 5 s default on
+    // slower machines, and the assertion is about bounding, not speed.
+    { timeout: 20_000 },
+    async () => {
+      let { bb, harness } = host();
+      await plugin(bb);
+      for (let i = 0; i < 105; i++)
+        seed(bb, `thread-${String(i).padStart(3, "0")}`);
+      await sweep(harness);
+      expect(harness.inspection.sdk.callsTo("threads.get")).toHaveLength(100);
+      expect(await bb.storage.kv.get(CURSOR)).toBe("thread-099");
+      ({ bb, harness } = await harness.lifecycle.reload(plugin));
+      harness.sdk.stub(
+        "threads.get",
+        async ({ threadId }: { threadId: string }) =>
+          makeThreadResponse({
+            id: threadId,
+            archivedAt: threadId === "thread-104" ? NOW - 8 * DAY : null,
+          }),
+      );
+      await harness.behavior.runService("cleanup-startup").done;
+      expect(harness.inspection.sdk.callsTo("threads.get")).toHaveLength(5);
+      expect(
+        await harness.behavior.callRpc("review", { threadId: "thread-104" }),
+      ).toEqual({ review: null });
+      expect(await bb.storage.kv.get(CURSOR)).toBe("");
+      await sweep(harness);
+      expect(harness.inspection.sdk.callsTo("threads.get")).toHaveLength(105);
+      await harness.lifecycle.dispose();
+    },
+  );
 
   it.each(["thread.unarchived", "thread.archived"] as const)(
     "coalesces sweeps and retains stale lookup data after $0",

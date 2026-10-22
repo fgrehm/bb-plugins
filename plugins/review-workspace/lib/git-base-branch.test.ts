@@ -132,7 +132,9 @@ describe("readBaseRefs", () => {
     const git = (...args: string[]) =>
       execFileSync("git", args, { cwd: dir, stdio: "pipe" });
     try {
-      git("init", "-q", "-b", "main");
+      // --template= keeps this independent of the host's git template directory,
+      // which some images ship with broken ownership.
+      git("init", "-q", "-b", "main", "--template=");
       git("config", "user.email", "test@example.com");
       git("config", "user.name", "Test");
       writeFileSync(join(dir, "a.txt"), "a\n");
