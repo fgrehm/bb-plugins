@@ -50,7 +50,7 @@
     "@types/react-dom": "^19.3.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "hono": "^4.13.7",
+    "hono": "^4.13.13",
     "jsdom": "^26.1.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -58,6 +58,6 @@
     "tailwind-merge": "^3.6.0",
     "typescript": "^5.9.3",
     "vaul": "^1.1.2",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }
