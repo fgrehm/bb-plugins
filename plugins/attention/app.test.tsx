@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type { rpcContract } from "./lib/contract";
@@ -7,9 +7,20 @@ import { buildReport, type RawEvent } from "./lib/day";
 import { weekRange } from "./lib/calendar";
 import type { DayThread } from "./lib/contract";
 
-afterEach(cleanup);
-
 const DAY = "2026-10-20";
+// The panel opens on the previous day, so pin the clock to noon UTC of the day
+// after the fixture; otherwise these tests pass only on one calendar day.
+const NOW = Date.parse(`${DAY}T12:00:00.000Z`) + 86_400_000;
+
+beforeEach(() => {
+  vi.spyOn(Date, "now").mockReturnValue(NOW);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  cleanup();
+});
+
 const at = (hour: number, minute = 0) =>
   Date.parse(`${DAY}T00:00:00.000Z`) + hour * 3_600_000 + minute * 60_000;
 
