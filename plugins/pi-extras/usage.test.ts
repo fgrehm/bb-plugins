@@ -49,6 +49,20 @@ test("parses Codex primary and secondary quota windows", () => {
   ]);
 });
 
+test("labels Codex windows from the duration the API declares", () => {
+  assert.deepEqual(parseCodexUsage({ rate_limit: {
+    primary_window: { used_percent: 4, limit_window_seconds: 604_800 },
+    secondary_window: {},
+  } }), [{ label: "Weekly", usedPercent: 4, resetsAt: null }]);
+  assert.deepEqual(parseCodexUsage({ rate_limit: {
+    primary_window: { used_percent: 12, limit_window_seconds: 2_592_000 },
+    secondary_window: { used_percent: 60, limit_window_seconds: 18_000 },
+  } }), [
+    { label: "30 days", usedPercent: 12, resetsAt: null },
+    { label: "5 hours", usedPercent: 60, resetsAt: null },
+  ]);
+});
+
 test("parses all OpenCode Go quota windows", () => {
   assert.deepEqual(parseOpenCodeGoUsage({ usage: {
     rolling: { percent: 4, resetsAt: "2026-09-03T15:00:00Z" },
@@ -158,7 +172,7 @@ test("explains that Pi's OpenAI SIWC sign-in cannot provide Codex usage", async 
     id: "codex",
     label: "Codex",
     status: "unavailable",
-    message: "Pi's openai sign-in can authorize Responses API requests, but OpenAI does not document an API for reading Codex usage. View usage in ChatGPT settings.",
+    message: "Pi's openai sign-in (Sign in with ChatGPT) cannot read Codex plan usage. Sign in with Pi's OpenAI Codex (legacy) provider to show it here, or view usage in ChatGPT settings.",
     windows: [],
   });
 });

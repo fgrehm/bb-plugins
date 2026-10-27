@@ -40,6 +40,10 @@ export interface UsageReaderDependencies {
   authPath?: string;
 }
 
+// Undocumented ChatGPT backend endpoint. The Codex CLI polls the same URL and
+// `codex app-server` exposes it as `account/rateLimits/read`, which is the other
+// way to read this data (it needs a Codex CLI login). Only a Codex OAuth
+// credential is accepted; see `parseCredentials`.
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage";
 const OLLAMA_USAGE_URL = "https://ollama.com/api/balance";
@@ -83,8 +87,24 @@ function authFilePath(): string {
 
 export function parseCredentials(payload: unknown): Credentials {
   const root = asRecord(payload);
-  // The `openai` provider's SIWC token authorizes Responses API inference, not
-  // ChatGPT backend usage requests. Only the legacy Codex credential supports this endpoint.
+  // Pi stores two different ChatGPT sign-ins, and they are not interchangeable
+  // for usage reads.
+  //
+  // `openai` is Sign in with ChatGPT (SIWC), granted against
+  // `api.openai.com/v1` with scopes `openid profile email offline_access
+  // resource.invoke chatgpt.tokens.use.direct`. Its token is audience-bound to
+  // the Responses API, so this endpoint rejects it with 401
+  // `rejected_by_access_enforcement` (`no_matching_rule`). The token also
+  // carries no plan or account claims, only `encrypted_auth_metadata`. That is
+  // a token-type limit, not a missing scope: requesting Codex's scopes would not
+  // help. openai/codex#54219 tracks the gap for token-sharing apps, and OpenAI
+  // has not answered it. Pi only links users to `chatgpt.com/settings/usage`.
+  //
+  // `openai-codex` is the Codex CLI OAuth credential, which the backend does
+  // accept. Pi names the provider "OpenAI Codex (legacy)" since pi-ai 0.99.0,
+  // where Sign in with ChatGPT superseded it. That is Pi's product naming, not
+  // an OpenAI deprecation: Pi still ships and fixes it, and `/login` still
+  // offers it as the ChatGPT Plus/Pro subscription sign-in.
   const openaiEntry = asRecord(root?.openai);
   const codexEntry = asRecord(root?.["openai-codex"]);
   const codexAccess = stringValue(codexEntry?.access);
@@ -102,6 +122,25 @@ export function parseCredentials(payload: unknown): Credentials {
   };
 }
 
+// The payload does not guarantee `primary_window` = 5 hours. Each window
+// declares `limit_window_seconds`, and plans vary: the common shapes are 18000
+// (5 h) and 604800 (7 d), a 2592000 (30 d) window has been observed, and the
+// weekly window can arrive as the primary one or be missing entirely
+// (aporcelli/pi-usage#2 reports the same mismatch). Label from the declared
+// duration so an empty `secondary_window` cannot produce a "5 hours" bar that
+// resets in days.
+function codexWindowLabel(window: JsonRecord | null, positional: string): string {
+  const seconds = numberValue(window?.limit_window_seconds);
+  if (seconds === null || seconds <= 0) return positional;
+  if (seconds % 86_400 === 0) {
+    const days = seconds / 86_400;
+    return days === 7 ? "Weekly" : days === 1 ? "1 day" : `${days} days`;
+  }
+  const hours = Math.round(seconds / 3_600);
+  if (hours > 0) return hours === 1 ? "1 hour" : `${hours} hours`;
+  return `${Math.max(1, Math.round(seconds / 60))} minutes`;
+}
+
 export function parseCodexUsage(payload: unknown): UsageWindow[] | null {
   const rateLimit = asRecord(asRecord(payload)?.rate_limit);
   if (rateLimit === null) return null;
@@ -110,7 +149,7 @@ export function parseCodexUsage(payload: unknown): UsageWindow[] | null {
     const window = asRecord(rateLimit[key]);
     const usedPercent = boundedPercent(window?.used_percent);
     if (usedPercent !== null) {
-      windows.push({ label, usedPercent, resetsAt: unixResetTime(window?.reset_at) });
+      windows.push({ label: codexWindowLabel(window, label), usedPercent, resetsAt: unixResetTime(window?.reset_at) });
     }
   }
   return windows.length === 0 ? null : windows;
@@ -242,7 +281,7 @@ export async function readPiUsage(deps: UsageReaderDependencies = {}): Promise<P
 
   const codex = credentials.codex === null
     ? Promise.resolve(credentials.openaiOAuthConfigured
-      ? unavailableSource("codex", "Codex", "Pi's openai sign-in can authorize Responses API requests, but OpenAI does not document an API for reading Codex usage. View usage in ChatGPT settings.")
+      ? unavailableSource("codex", "Codex", "Pi's openai sign-in (Sign in with ChatGPT) cannot read Codex plan usage. Sign in with Pi's OpenAI Codex (legacy) provider to show it here, or view usage in ChatGPT settings.")
       : unconfigured("codex", "Codex"))
     : fetchSource("codex", "Codex", CODEX_USAGE_URL, credentials.codex.access, parseCodexUsage, fetcher, {
       "ChatGPT-Account-Id": credentials.codex.accountId,
