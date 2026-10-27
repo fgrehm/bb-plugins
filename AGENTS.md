@@ -77,7 +77,7 @@ Because a push is installable everywhere immediately, `main` must stay green. La
 Record what changed as a rolling changelog:
 
 - Each plugin's `CHANGELOG.md` is dated, not versioned. Add the entry under `## YYYY-MM-DD`, newest date first, in the same commit that lands the change; reuse that day's existing heading instead of adding a second one. Optional `### Added`, `### Changed`, `### Fixed` subsections stay inside the date.
-- `package.json` `version` stays at `0.1.0` until a versioned release is actually wanted. Note that `plugins/rpiv-todo` once carried a semver-shaped changelog; it now follows the same rolling rule.
+- `package.json` `version` is not maintained. It stays `0.1.0`, as every bundled BB plugin does, and the installed commit identifies the build. The changelog is the readable record.
 - Keep `bb.description` (about 140 characters or fewer), `PLUGIN_OVERVIEW.md`, the catalog entry, and the root README aligned, then run the overview sync.
 
 ## New-plugin checklist
