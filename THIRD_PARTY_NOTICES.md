@@ -16,6 +16,12 @@ This repository is MIT licensed (see `LICENSE`, which credits Fabio Rehm). Vendo
 - Used in: `plugins/pi-extras/usage-page/components/usage/providers.tsx` (the OpenCode provider mark, from bb's landing icons)
 - Used in: `plugins/rate-your-chat/components/ui/` and `plugins/rate-your-chat/lib/utils.ts` (BB scaffold UI controls and styling helpers; full license text: `plugins/rate-your-chat/components/LICENSE`)
 
+## ZhenHuangLab/bb-rpiv-todo-renderer
+
+- Source: https://github.com/ZhenHuangLab/bb-rpiv-todo-renderer
+- License: MIT - Copyright (c) 2026 Zhen Huang (full license text: `plugins/rpiv-todo/LICENSE`)
+- Used in: `plugins/rpiv-todo/` (forked at 0.1.2; event pages changed from 500 to 100 to match BB 0.47's limit, and reducer/paging tests added)
+
 ## simple-icons/simple-icons
 
 - Source: https://github.com/simple-icons/simple-icons

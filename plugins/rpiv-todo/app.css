@@ -1,0 +1,45 @@
+.rpiv-todo-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+}
+
+.rpiv-todo-spin {
+  margin-top: 0.125rem;
+  animation: rpiv-todo-spin 0.9s linear infinite;
+}
+
+@keyframes rpiv-todo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.rpiv-todo-chevron {
+  transition: transform 200ms ease;
+}
+
+.rpiv-todo-chevron-open {
+  transform: rotate(180deg);
+}
+
+.rpiv-todo-body {
+  display: grid;
+  overflow: hidden;
+  transition:
+    grid-template-rows 200ms ease-out,
+    opacity 200ms ease-out,
+    border-color 200ms ease-out;
+}
+
+.rpiv-todo-body-open {
+  grid-template-rows: 1fr;
+  border-top: 1px solid var(--border);
+  opacity: 1;
+}
+
+.rpiv-todo-body-closed {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  pointer-events: none;
+}

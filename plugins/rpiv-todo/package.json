@@ -1,0 +1,46 @@
+{
+  "name": "bb-plugin-rpiv-todo",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "Shows Pi rpiv-todo tasks in BB's native composer to-do panel.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fgrehm/bb-plugins.git",
+    "directory": "plugins/rpiv-todo"
+  },
+  "engines": {
+    "bb": ">=0.47",
+    "bbPluginSdk": ">=0.6.79"
+  },
+  "bb": {
+    "name": "RPIV Todo",
+    "description": "Shows Pi rpiv-todo tasks in BB's composer to-do list. Reconstructs the live list from todo tool calls because BB only special-cases TodoWrite and Claude Task* tools.",
+    "branding": {
+      "icon": "./assets/icon.svg"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "prettier --check \"*.ts\" \"*.tsx\" \"*.css\" \"src/**/*.ts\" \"src/**/*.tsx\" \"README.md\" \"CHANGELOG.md\" \"package.json\"",
+    "format": "prettier --write \"*.ts\" \"*.tsx\" \"*.css\" \"src/**/*.ts\" \"src/**/*.tsx\" \"README.md\" \"CHANGELOG.md\" \"package.json\""
+  },
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.6.79",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "better-sqlite3": "^13.0.3",
+    "hono": "^4.13.14",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

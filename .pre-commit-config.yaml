@@ -107,3 +107,28 @@ repos:
         groups: [pi-extras, test]
         stages: [pre-push]
         pass_filenames: false
+
+      - id: rpiv-todo-typecheck
+        name: rpiv-todo typecheck
+        entry: bash -c 'cd plugins/rpiv-todo && pnpm run typecheck'
+        language: system
+        files: ^plugins/rpiv-todo/
+        groups: [rpiv-todo, typecheck]
+        pass_filenames: false
+
+      - id: rpiv-todo-format
+        name: rpiv-todo format
+        entry: bash -c 'cd plugins/rpiv-todo && pnpm run lint'
+        language: system
+        files: ^plugins/rpiv-todo/
+        groups: [rpiv-todo, format]
+        pass_filenames: false
+
+      - id: rpiv-todo-tests
+        name: rpiv-todo tests
+        entry: bash -c 'cd plugins/rpiv-todo && pnpm test'
+        language: system
+        files: ^plugins/rpiv-todo/
+        groups: [rpiv-todo, test]
+        stages: [pre-push]
+        pass_filenames: false
