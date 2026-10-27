@@ -3,7 +3,10 @@ import {
   compareSnapshots,
   compareSinceViewed,
   decodeReviewTarget,
+  describeRevisionLabel,
+  describeRevisionTitle,
   describeReviewTarget,
+  describeReviewTargetCompact,
   encodeReviewTarget,
   isDeferredDiff,
   type DeltaSnapshot,
@@ -32,6 +35,44 @@ describe("review model", () => {
     );
     expect(isDeferredDiff("db/schema.rb", 10)).toBe("Generated Rails schema");
     expect(isDeferredDiff("db/migrate/001_create_users.rb", 10)).toBeNull();
+  });
+
+  it("leads revision labels with a compact target and only names open comments", () => {
+    const now = new Date(2026, 9, 27, 15, 0, 0).getTime();
+    const today = new Date(2026, 9, 27, 14, 26, 0).getTime();
+    const earlier = new Date(2026, 9, 20, 9, 5, 0).getTime();
+
+    expect(
+      describeReviewTargetCompact({ type: "commit", sha: "abcdef1234" }),
+    ).toBe("commit abcdef1");
+    expect(
+      describeReviewTargetCompact({ type: "all", mergeBaseBranch: "main" }),
+    ).toBe("all vs main");
+
+    const quiet = describeRevisionLabel(
+      { createdAt: today, target: { type: "uncommitted" }, unresolvedCount: 0 },
+      now,
+    );
+    expect(quiet.startsWith("uncommitted · ")).toBe(true);
+    expect(quiet).not.toContain("open");
+
+    const revision = {
+      createdAt: earlier,
+      target: { type: "branch_committed", mergeBaseBranch: "main" } as const,
+      unresolvedCount: 2,
+    };
+    const label = describeRevisionLabel(revision, now);
+    expect(label).toContain("vs main");
+    expect(label).toContain("2 open");
+    expect(label).toContain(
+      new Date(earlier).toLocaleDateString([], {
+        month: "numeric",
+        day: "numeric",
+      }),
+    );
+    expect(describeRevisionTitle(revision)).toBe(
+      `${new Date(earlier).toLocaleString()} · committed vs main · 2 open`,
+    );
   });
 
   it("compares content identity, reverts, and path unions against a verified base", () => {

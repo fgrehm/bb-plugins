@@ -20,11 +20,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, within } from "@testing-library/react";
 import { loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.localStorage.clear();
+});
 
 // The mobile file-navigation popover labels every row "Open <path>".
 function openedFileRow(slot: any, path: string) {
   return slot.getByRole("button", { name: `Open ${path}` });
+}
+
+// While a review loads, the start card also renders the target form. Wait for
+// it to unmount before reading the header disclosure's copy of the controls.
+async function loadedReviewTargetSelect(slot: any) {
+  await vi.waitFor(() =>
+    expect(slot.queryByText("No review yet for this thread")).toBeNull(),
+  );
+  return slot.getAllByRole("combobox", { name: "Review target" })[0]!;
 }
 
 vi.mock("@/components/ui/icon", () => ({
@@ -333,7 +345,7 @@ describe("Review Workspace app", () => {
       value: 40,
     });
 
-    fireEvent.click(slot.getByRole("button", { name: "Viewed & next" }));
+    fireEvent.click(slot.getAllByRole("button", { name: "Viewed & next" })[0]!);
     await vi.waitFor(() => {
       expect(scrollTo).toHaveBeenCalledWith({ top: 380, behavior: "auto" });
     });
@@ -2187,7 +2199,7 @@ describe("Review Workspace app", () => {
     expect(
       openedFileRow(slot, "src/example.ts").getAttribute("aria-current"),
     ).toBe("true");
-    slot.getByRole("button", { name: "Viewed & next" }).click();
+    slot.getAllByRole("button", { name: "Viewed & next" })[0]!.click();
     await vi.waitFor(() => {
       expect(fileSummary.textContent).toContain("No matching files");
     });
@@ -2511,11 +2523,7 @@ describe("Review Workspace app", () => {
         } as any,
       },
     );
-    const select = (
-      await slot.findAllByRole("combobox", {
-        name: "Review target",
-      })
-    )[0]!;
+    const select = await loadedReviewTargetSelect(slot);
     // The suggestion only applies to targets that need a base branch.
     fireEvent.change(select, { target: { value: "branch" } });
     const baseInput = slot.getAllByLabelText(
@@ -2566,11 +2574,7 @@ describe("Review Workspace app", () => {
         } as any,
       },
     );
-    const select = (
-      await slot.findAllByRole("combobox", {
-        name: "Review target",
-      })
-    )[0]!;
+    const select = await loadedReviewTargetSelect(slot);
     const action = () =>
       slot.getAllByRole("button", {
         // After a refresh the panel resets to its saved target, whose action
@@ -3078,11 +3082,7 @@ describe("Review Workspace app", () => {
         } as any,
       },
     );
-    const select = (
-      await slot.findAllByRole("combobox", {
-        name: "Review target",
-      })
-    )[0]!;
+    const select = await loadedReviewTargetSelect(slot);
     fireEvent.change(select, { target: { value: "branch" } });
     expect(
       await slot.findByText("The review target needs a git checkout."),
@@ -3740,7 +3740,7 @@ describe("Review Workspace app", () => {
     expect(
       slot.queryByRole("button", { name: "Open docs/guide.md" }),
     ).toBeNull();
-    slot.getByRole("button", { name: "Viewed & next" }).click();
+    slot.getAllByRole("button", { name: "Viewed & next" })[0]!.click();
     await vi.waitFor(() => {
       expect(
         openedFileRow(slot, "src/example.ts").getAttribute("aria-current"),
@@ -4125,6 +4125,158 @@ describe("review target picker (specific commit)", () => {
         },
       });
     });
+    slot.lifecycle.unmount();
+  });
+
+  it("keeps a single request form when the thread already has a review", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const slot = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "review/thread-ui" },
+      {
+        context: { projectId: "project-ui", threadId: "thread-ui" },
+        rpc: {
+          review: async () => ({ review: reviewFixture() }),
+          revisions: async () => ({ revisions: [] }),
+        } as any,
+      },
+    );
+    await slot.findByText("Compare / refresh");
+    expect(slot.queryByText("No review yet for this thread")).toBeNull();
+    expect(slot.getAllByText("Compare / refresh")).toHaveLength(1);
+    expect(
+      slot.getAllByRole("combobox", { name: "Review target" }),
+    ).toHaveLength(1);
+    slot.lifecycle.unmount();
+  });
+
+  it("closes the header disclosures on Escape, outside pointer and refresh", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const refreshCalls: any[] = [];
+    const slot = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "review/thread-ui" },
+      {
+        context: { projectId: "project-ui", threadId: "thread-ui" },
+        rpc: {
+          review: async () => ({ review: reviewFixture() }),
+          revisions: async () => ({ revisions: [] }),
+          refreshReview: async (input: any) => {
+            refreshCalls.push(input);
+            return { review: reviewFixture() };
+          },
+        } as any,
+      },
+    );
+    const summary = await slot.findByText("Compare / refresh");
+    const details = summary.closest("details")!;
+    details.open = true;
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(details.open).toBe(false);
+    expect(document.activeElement).toBe(summary);
+
+    details.open = true;
+    fireEvent.pointerDown(
+      slot.getAllByRole("combobox", { name: "Review target" })[0]!,
+    );
+    expect(details.open).toBe(true);
+
+    fireEvent.pointerDown(document.body);
+    expect(details.open).toBe(false);
+
+    details.open = true;
+    fireEvent.click(slot.getAllByRole("button", { name: "Refresh" })[0]!);
+    await vi.waitFor(() => expect(refreshCalls).toHaveLength(1));
+    expect(details.open).toBe(false);
+
+    const actions = slot.getByLabelText("Review actions").closest("details")!;
+    actions.open = true;
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(actions.open).toBe(false);
+    slot.lifecycle.unmount();
+  });
+
+  it("groups the diff display toggles and remembers them across mounts", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const mount = () =>
+      renderSlot(
+        app.navPanels[0]!,
+        { subPath: "review/thread-ui" },
+        {
+          context: { projectId: "project-ui", threadId: "thread-ui" },
+          rpc: {
+            review: async () => ({ review: reviewFixture() }),
+            revisions: async () => ({ revisions: [] }),
+          } as any,
+        },
+      );
+
+    const slot = mount();
+    const wrap = await slot.findByRole("button", { name: "Wrap diff lines" });
+    expect(wrap.closest('[role="group"]')?.getAttribute("aria-label")).toBe(
+      "Diff display",
+    );
+    // The tooltip lives on the wrapper because the shared Button omits title.
+    expect(wrap.parentElement?.getAttribute("title")).toBe(
+      "Wrap long diff lines",
+    );
+    fireEvent.click(wrap);
+    await vi.waitFor(() =>
+      expect(
+        JSON.parse(
+          window.localStorage.getItem("review-workspace:diff-display") ?? "{}",
+        ),
+      ).toMatchObject({ wrapLines: true, diffLayout: "unified" }),
+    );
+    slot.lifecycle.unmount();
+
+    const second = mount();
+    expect(
+      (
+        await second.findByRole("button", { name: "Disable diff line wrap" })
+      ).getAttribute("aria-pressed"),
+    ).toBe("true");
+    second.lifecycle.unmount();
+  });
+
+  it("exposes the viewed action in the desktop controls row too", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const base = reviewFixture();
+    const review = {
+      ...base,
+      files: [
+        ...base.files,
+        {
+          ...base.files[0]!,
+          path: "docs/guide.md",
+          patch: patch.replaceAll("src/example.ts", "docs/guide.md"),
+        },
+      ],
+    };
+    const viewedCalls: any[] = [];
+    const slot = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "review/thread-ui" },
+      {
+        context: { projectId: "project-ui", threadId: "thread-ui" },
+        rpc: {
+          review: async () => ({ review }),
+          revisions: async () => ({ revisions: [] }),
+          markFileViewed: async (input: any) => {
+            viewedCalls.push(input);
+            return { viewedCount: 1 };
+          },
+        } as any,
+      },
+    );
+    const actions = await slot.findAllByTestId("viewed-action");
+    expect(actions).toHaveLength(2);
+    actions[1]!.click();
+    await vi.waitFor(() =>
+      expect(viewedCalls).toEqual([
+        { reviewId: review.id, filePath: "src/example.ts", viewed: true },
+      ]),
+    );
     slot.lifecycle.unmount();
   });
 });

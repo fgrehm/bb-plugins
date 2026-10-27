@@ -41,11 +41,42 @@ import {
 } from "./lib/review-navigation";
 import { normalizeChangeKind } from "./lib/utils";
 import {
+  describeRevisionLabel,
+  describeRevisionTitle,
+} from "./lib/review-model";
+import {
   isVisiblePatchRange,
   excerptPatch,
   patchHunkStarts,
   patchSourceLines,
 } from "./lib/tours";
+
+const DIFF_DISPLAY_STORAGE_KEY = "review-workspace:diff-display";
+const VIEW_TOGGLE_BUTTON_CLASS =
+  "h-8 w-8 rounded-md p-0 text-muted-foreground [&_svg]:size-4 max-md:pointer-coarse:h-9 max-md:pointer-coarse:w-9 max-md:pointer-coarse:[&_svg]:size-5";
+
+type DiffDisplayPreferences = {
+  wrapLines: boolean;
+  diffLayout: "unified" | "split";
+};
+
+function readDiffDisplayPreferences(): DiffDisplayPreferences {
+  const fallback: DiffDisplayPreferences = {
+    wrapLines: false,
+    diffLayout: "unified",
+  };
+  try {
+    const raw = window.localStorage.getItem(DIFF_DISPLAY_STORAGE_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<DiffDisplayPreferences>;
+    return {
+      wrapLines: parsed.wrapLines === true,
+      diffLayout: parsed.diffLayout === "split" ? "split" : "unified",
+    };
+  } catch {
+    return fallback;
+  }
+}
 
 type File = {
   path: string;
@@ -551,6 +582,41 @@ function useSheetFocus({
       last.focus();
     }
   };
+}
+
+/**
+ * Native `<details>` disclosures stay open until their summary is clicked
+ * again: there is no outside-click or Escape handling. Close them the way a
+ * menu is expected to close, and return focus to the summary when Escape
+ * does it. Enable it only while the disclosure is mounted.
+ */
+function useDismissableDetails(
+  ref: React.RefObject<HTMLDetailsElement | null>,
+  enabled = true,
+): void {
+  useEffect(() => {
+    const element = ref.current;
+    if (!enabled || !element) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!element.open) return;
+      if (event.target instanceof Node && element.contains(event.target))
+        return;
+      element.open = false;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !element.open) return;
+      event.preventDefault();
+      event.stopPropagation();
+      element.open = false;
+      element.querySelector<HTMLElement>("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [enabled, ref]);
 }
 
 function LazyDiffSurface({
@@ -1799,6 +1865,36 @@ function FileFilterControls({
   );
 }
 
+/**
+ * The one viewed control, rendered in the phone toolbar and in the desktop
+ * controls row so marking a file viewed never needs a scroll back to its
+ * header. Both instances share behavior and label.
+ */
+function ViewedAction({
+  isViewed,
+  disabled,
+  onClick,
+  className,
+}: {
+  isViewed: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <Button
+      className={className}
+      size="sm"
+      variant={isViewed ? "secondary" : "default"}
+      onClick={onClick}
+      disabled={disabled}
+      data-testid="viewed-action"
+    >
+      {isViewed ? "Viewed ✓" : "Viewed & next"}
+    </Button>
+  );
+}
+
 function ReviewPanel({ threadId }: { threadId: string }) {
   const rpc = useRpc<typeof rpcContract>();
   const pluginId = experimental_usePluginId();
@@ -1860,6 +1956,9 @@ function ReviewPanel({ threadId }: { threadId: string }) {
   const feedbackOpenerRef = useRef<HTMLElement | null>(null);
   const mobileMoreRef = useRef<HTMLDetailsElement | null>(null);
   const reviewActionsRef = useRef<HTMLDetailsElement | null>(null);
+  const compareDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  useDismissableDetails(reviewActionsRef);
+  useDismissableDetails(compareDetailsRef, Boolean(review));
   const [mobileFileListOpen, setMobileFileListOpen] = useState(false);
   const [mobileCompareOpen, setMobileCompareOpen] = useState(false);
   const [mobileMenuTop, setMobileMenuTop] = useState<number | null>(null);
@@ -1887,7 +1986,8 @@ function ReviewPanel({ threadId }: { threadId: string }) {
   // Bumped by every revision load, so a completion that outlives an A -> B -> A
   // round trip is still recognised as stale.
   const reviewGenerationRef = useRef(0);
-  const [diffLayout, setDiffLayout] = useState<"unified" | "split">("unified");
+  const [diffDisplay, setDiffDisplay] = useState(readDiffDisplayPreferences);
+  const { wrapLines, diffLayout } = diffDisplay;
   const [baseSuggestion, setBaseSuggestion] = useState<{
     suggestedBase: string | null;
     suggestionSource:
@@ -1903,7 +2003,16 @@ function ReviewPanel({ threadId }: { threadId: string }) {
   const [mobilePanel, setMobilePanel] = useState<"compose" | null>(null);
   const [fileQuery, setFileQuery] = useState("");
   const [fileFilterMode, setFileFilterMode] = useState<FileFilterMode>("all");
-  const [wrapLines, setWrapLines] = useState(false);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        DIFF_DISPLAY_STORAGE_KEY,
+        JSON.stringify(diffDisplay),
+      );
+    } catch {
+      // Private mode or a full quota: the preference stays in memory.
+    }
+  }, [diffDisplay]);
   const [busy, setBusy] = useState(false);
   const sendingRef = useRef(false);
   const summarySaveRef = useRef<Promise<void>>(Promise.resolve());
@@ -2402,6 +2511,12 @@ function ReviewPanel({ threadId }: { threadId: string }) {
         annotation.author !== "agent",
     ).length ?? 0;
   const isViewed = Boolean(file && review?.viewedPaths.includes(file.path));
+  const currentDirectory = file?.path.includes("/")
+    ? `${file.path.slice(0, file.path.lastIndexOf("/"))}/`
+    : "";
+  const currentBasename = file?.path.split("/").pop() ?? "";
+  const selectedRevision =
+    revisions.find((revision) => revision.id === review?.id) ?? null;
 
   const loadDeferredDiff = useCallback(
     async (path: string) => {
@@ -2932,6 +3047,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
       )
     )
       return;
+    if (reviewActionsRef.current) reviewActionsRef.current.open = false;
     setBusy(true);
     try {
       await rpc.call("clearPreviousReviews", {
@@ -3228,6 +3344,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
   }
   async function carryForward() {
     if (!review || !revisions[0] || review.id === revisions[0].id) return;
+    if (reviewActionsRef.current) reviewActionsRef.current.open = false;
     const annotationIds = review.annotations
       .filter((annotation) => annotation.resolvedAt === null)
       .map((annotation) => annotation.id);
@@ -3322,9 +3439,13 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     </>
   );
   const renderExactRangeControl = (mobile: boolean) => (
-    <details className={mobile ? "rounded border p-2" : "relative"}>
+    <details
+      className={
+        mobile ? "rounded border p-2" : "relative shrink-0 whitespace-nowrap"
+      }
+    >
       <summary
-        className={`cursor-pointer rounded text-[11px] ${mobile ? "font-medium" : "border px-2 py-1"}`}
+        className={`cursor-pointer whitespace-nowrap rounded text-[11px] ${mobile ? "font-medium" : "border px-2 py-1"}`}
       >
         Exact range
       </summary>
@@ -3489,6 +3610,13 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     onClose: () => setMobileCompareOpen(false),
   });
 
+  // Requesting a new snapshot or a refresh from the header disclosure closes
+  // it first, so the panel never sits open over the review while it reloads.
+  function requestRefresh(input?: { target?: ReviewTarget }) {
+    if (compareDetailsRef.current) compareDetailsRef.current.open = false;
+    void refresh(input);
+  }
+
   const renderComparePanel = () => (
     <div className="flex flex-wrap items-center gap-2">
       <select
@@ -3563,7 +3691,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
       ) : null}
       <Button
         size="sm"
-        onClick={() => void refresh({ target: buildRefreshTarget() })}
+        onClick={() => requestRefresh({ target: buildRefreshTarget() })}
         disabled={
           busy || (targetKind !== "uncommitted" && !effectiveTargetValue())
         }
@@ -3591,7 +3719,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             className="h-7 px-2 text-[11px]"
             disabled={busy}
             onClick={() =>
-              void refresh({
+              requestRefresh({
                 target: {
                   type: "branch_committed",
                   mergeBaseBranch: baseSuggestion.suggestedBase!,
@@ -3607,7 +3735,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             className="h-7 px-2 text-[11px]"
             disabled={busy}
             onClick={() =>
-              void refresh({
+              requestRefresh({
                 target: {
                   type: "all",
                   mergeBaseBranch: baseSuggestion.suggestedBase!,
@@ -4332,14 +4460,16 @@ function ReviewPanel({ threadId }: { threadId: string }) {
         >
           <Icon name={fullscreen ? "Minimize2" : "Maximize2"} />
         </Button>
-        <details className="relative max-lg:hidden">
-          <summary className="flex h-8 cursor-pointer list-none items-center rounded-md border px-2 text-xs hover:bg-muted">
-            Compare / refresh
-          </summary>
-          <div className="absolute right-0 top-full z-30 mt-2 w-[min(28rem,calc(100vw-2rem))] rounded-lg border bg-popover p-3 shadow-lg">
-            {renderComparePanel()}
-          </div>
-        </details>
+        {review ? (
+          <details ref={compareDetailsRef} className="relative max-lg:hidden">
+            <summary className="flex h-8 cursor-pointer list-none items-center rounded-md border px-2 text-xs hover:bg-muted">
+              Compare / refresh
+            </summary>
+            <div className="absolute right-0 top-full z-30 mt-2 w-[min(28rem,calc(100vw-2rem))] rounded-lg border bg-popover p-3 shadow-lg">
+              {renderComparePanel()}
+            </div>
+          </details>
+        ) : null}
       </header>
       {review && revisions[0] && review.id !== revisions[0].id ? (
         <p
@@ -4406,37 +4536,58 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                   <option value="since-viewed">Since viewed</option>
                 </select>
               ) : null}
+              <span
+                aria-hidden="true"
+                className="mx-0.5 hidden h-5 w-px bg-border sm:inline-block"
+              />
+              <div
+                role="group"
+                aria-label="Diff display"
+                className="flex items-center gap-0.5"
+              >
+                <span className="inline-flex" title="Wrap long diff lines">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={VIEW_TOGGLE_BUTTON_CLASS}
+                    onClick={() =>
+                      setDiffDisplay((current) => ({
+                        ...current,
+                        wrapLines: !current.wrapLines,
+                      }))
+                    }
+                    aria-pressed={wrapLines}
+                    aria-label={
+                      wrapLines ? "Disable diff line wrap" : "Wrap diff lines"
+                    }
+                  >
+                    <Icon name="TextWrap" />
+                  </Button>
+                </span>
+                <span className="inline-flex" title="Split the diff view">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className={VIEW_TOGGLE_BUTTON_CLASS}
+                    onClick={() =>
+                      setDiffDisplay((current) => ({
+                        ...current,
+                        diffLayout:
+                          current.diffLayout === "split" ? "unified" : "split",
+                      }))
+                    }
+                    aria-pressed={diffLayout === "split"}
+                    aria-label={
+                      diffLayout === "split"
+                        ? "Use unified diff view"
+                        : "Use split diff view"
+                    }
+                  >
+                    <Icon name="Columns2" />
+                  </Button>
+                </span>
+              </div>
               <div className="flex-1" />
-              <Button
-                size="sm"
-                variant="ghost"
-                className={`${COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS} text-muted-foreground`}
-                onClick={() => setWrapLines((current) => !current)}
-                aria-pressed={wrapLines}
-                aria-label={
-                  wrapLines ? "Disable diff line wrap" : "Wrap diff lines"
-                }
-              >
-                <Icon name="TextWrap" />
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className={`${COARSE_POINTER_COMPACT_ICON_BUTTON_CLASS} text-muted-foreground`}
-                onClick={() =>
-                  setDiffLayout((current) =>
-                    current === "split" ? "unified" : "split",
-                  )
-                }
-                aria-pressed={diffLayout === "split"}
-                aria-label={
-                  diffLayout === "split"
-                    ? "Use unified diff view"
-                    : "Use split diff view"
-                }
-              >
-                <Icon name="Columns2" />
-              </Button>
               <Button
                 size="sm"
                 variant="ghost"
@@ -4473,15 +4624,22 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                   </label>
                   <select
                     aria-label="Review revision"
+                    title={
+                      selectedRevision
+                        ? describeRevisionTitle(selectedRevision)
+                        : undefined
+                    }
                     value={review.id}
                     onChange={(event) => void load(event.target.value)}
                     className="mt-2 w-full rounded-md border bg-background px-2 py-2 text-xs"
                   >
                     {revisions.map((revision) => (
-                      <option key={revision.id} value={revision.id}>
-                        {new Date(revision.createdAt).toLocaleString()} ·{" "}
-                        {describeTarget(revision.target)} ·{" "}
-                        {revision.unresolvedCount} open
+                      <option
+                        key={revision.id}
+                        value={revision.id}
+                        title={describeRevisionTitle(revision)}
+                      >
+                        {describeRevisionLabel(revision)}
                       </option>
                     ))}
                   </select>
@@ -4745,10 +4903,17 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                       ) : null}
                     </button>
                     <span
-                      className="hidden min-w-0 flex-1 truncate px-1 font-mono text-xs font-semibold lg:block"
+                      className="hidden min-w-0 flex-1 items-baseline gap-0.5 px-1 font-mono text-xs font-semibold lg:flex"
                       title={file?.path}
                     >
-                      {file?.path ?? "No changed files"}
+                      {currentDirectory ? (
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          {currentDirectory}
+                        </span>
+                      ) : null}
+                      <span className="shrink-0">
+                        {file ? currentBasename : "No changed files"}
+                      </span>
                     </span>
 
                     <details ref={mobileMoreRef} className="shrink-0 lg:hidden">
@@ -4875,19 +5040,16 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                         </div>
                       </div>
                     </details>
-                    <Button
+                    <ViewedAction
                       className="shrink-0 whitespace-nowrap lg:hidden max-sm:px-2 max-sm:text-[11px]"
-                      size="sm"
-                      variant={isViewed ? "secondary" : "default"}
+                      isViewed={isViewed}
+                      disabled={!file}
                       onClick={() =>
                         void (isViewed
                           ? markViewed(false)
                           : markViewedAndNext(true))
                       }
-                      disabled={!file}
-                    >
-                      {isViewed ? "Viewed ✓" : "Viewed & next"}
-                    </Button>
+                    />
                     <span className="hidden text-[11px] text-muted-foreground sm:inline">
                       {currentIndex} / {review.files.length}
                     </span>
@@ -4921,7 +5083,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                       </Button>
                     </div>
                     <details className="relative hidden lg:block">
-                      <summary className="cursor-pointer rounded px-1 text-[11px] text-muted-foreground">
+                      <summary className="cursor-pointer whitespace-nowrap rounded px-1 text-[11px] text-muted-foreground">
                         Baseline
                       </summary>
                       <div className="absolute right-0 z-30 mt-1 max-h-64 w-72 overflow-auto rounded-md border bg-popover p-2 text-xs shadow-lg">
@@ -4990,6 +5152,16 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                         ) : null}
                       </div>
                     </details>
+                    <ViewedAction
+                      className="hidden shrink-0 whitespace-nowrap lg:inline-flex"
+                      isViewed={isViewed}
+                      disabled={!file}
+                      onClick={() =>
+                        void (isViewed
+                          ? markViewed(false)
+                          : markViewedAndNext(true))
+                      }
+                    />
                   </div>
                 </div>
                 <div className="p-1.5 sm:p-2 lg:p-4">

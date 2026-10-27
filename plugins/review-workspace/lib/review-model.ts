@@ -41,6 +41,62 @@ export function describeReviewTarget(target: ReviewTarget): string {
   }
 }
 
+/** Short target names for space-constrained surfaces such as the revision picker. */
+export function describeReviewTargetCompact(target: ReviewTarget): string {
+  switch (target.type) {
+    case "commit":
+      return `commit ${target.sha.slice(0, 7)}`;
+    case "branch_committed":
+      return `vs ${target.mergeBaseBranch}`;
+    case "all":
+      return `all vs ${target.mergeBaseBranch}`;
+    case "uncommitted":
+      return "uncommitted";
+  }
+}
+
+export type RevisionLabelInput = {
+  createdAt: number;
+  target: ReviewTarget;
+  unresolvedCount: number;
+};
+
+function sameLocalDay(left: Date, right: Date): boolean {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+/**
+ * Compact label for the revision select. The rail is narrow, so the target
+ * comes first and the date appears only when the snapshot is not from today.
+ * Full text lives in the option's title.
+ */
+export function describeRevisionLabel(
+  revision: RevisionLabelInput,
+  now: number = Date.now(),
+): string {
+  const created = new Date(revision.createdAt);
+  const time = created.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const stamp = sameLocalDay(created, new Date(now))
+    ? time
+    : `${created.toLocaleDateString([], { month: "numeric", day: "numeric" })} ${time}`;
+  const open = revision.unresolvedCount
+    ? ` · ${revision.unresolvedCount} open`
+    : "";
+  return `${describeReviewTargetCompact(revision.target)} · ${stamp}${open}`;
+}
+
+/** Full revision label for tooltips and assistive context. */
+export function describeRevisionTitle(revision: RevisionLabelInput): string {
+  return `${new Date(revision.createdAt).toLocaleString()} · ${describeReviewTarget(revision.target)} · ${revision.unresolvedCount} open`;
+}
+
 export function isDeferredDiff(
   path: string,
   patchBytes: number,
