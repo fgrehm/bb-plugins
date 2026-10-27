@@ -74,9 +74,10 @@ Plugins are not published to npm. Catalog entries track `main` with a per-plugin
 
 Because a push is installable everywhere immediately, `main` must stay green. Land changes only when the plugin's typecheck, tests, formatter, and `bb plugin build` pass, plus `prek run --all-files` and a clean `git diff --check`. CI on the tip is the gate for running `bb plugin update --all` on other machines.
 
-Record what changed anyway:
+Record what changed as a rolling changelog:
 
-- Bump `package.json` `version` and move `CHANGELOG.md` notes from `## [Unreleased]` into a `## [<version>] - YYYY-MM-DD` section when a change is worth naming. Ref installs compare commits, not versions, so this is documentation rather than a release gate.
+- Each plugin's `CHANGELOG.md` is dated, not versioned. Add the entry under `## YYYY-MM-DD`, newest date first, in the same commit that lands the change; reuse that day's existing heading instead of adding a second one. Optional `### Added`, `### Changed`, `### Fixed` subsections stay inside the date.
+- `package.json` `version` stays at `0.1.0` until a versioned release is actually wanted. Note that `plugins/rpiv-todo` once carried a semver-shaped changelog; it now follows the same rolling rule.
 - Keep `bb.description` (about 140 characters or fewer), `PLUGIN_OVERVIEW.md`, the catalog entry, and the root README aligned, then run the overview sync.
 
 ## New-plugin checklist

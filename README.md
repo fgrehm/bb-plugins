@@ -76,7 +76,7 @@ Shows a Pi agent's to-do list above the thread's composer in BB's native to-do c
 
 ## Repo layout
 
-Each plugin is self-contained under `plugins/<id>/` with its own `package.json` and lockfile (pnpm). [`marketplace.json`](marketplace.json) at the root is the published v2 catalog BB reads. Its `overview` fields are generated from each catalogued plugin's `PLUGIN_OVERVIEW.md`; other catalog metadata stays hand-authored. Catalog entries point at `main` with a per-plugin `subdir`, so `bb plugin outdated` compares the installed commit with the branch head; there are no release tags to manage.
+Each plugin is self-contained under `plugins/<id>/` with its own `package.json` and lockfile (pnpm). [`marketplace.json`](marketplace.json) at the root is the published v2 catalog BB reads. Its `overview` fields are generated from each catalogued plugin's `PLUGIN_OVERVIEW.md`; other catalog metadata stays hand-authored. Catalog entries point at `main` with a per-plugin `subdir`, so `bb plugin outdated` compares the installed commit with the branch head; there are no release tags to manage. Each plugin's `CHANGELOG.md` is a rolling, dated log rather than a release history, and `package.json` versions stay at `0.1.0` until a versioned release is ever wanted.
 
 ## Marketplace copy
 

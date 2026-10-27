@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## 2026-10-27
+
+- Updates zod to 4.6.7 for a memory-exhaustion advisory in versions below 4.6.6.
+
+## 2026-10-18
 
 - Render tour narrative notes and the tour overview as Markdown with BB's chat-message renderer, so agent notes show inline code, lists, and links instead of literal backticks.
 

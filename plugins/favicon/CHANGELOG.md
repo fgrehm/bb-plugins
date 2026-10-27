@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## 2026-10-27
+
+- Updates zod to 4.6.7 for a memory-exhaustion advisory in versions below 4.6.6.
+
+## 2026-09-29
 
 ### Added
 
