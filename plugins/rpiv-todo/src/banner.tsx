@@ -57,14 +57,14 @@ function TodoRow({ item }: { item: TodoItem }) {
     >
       <StatusGlyph status={item.status} />
       <span className="min-w-0 flex-1" title={title}>
-        <span className="block truncate">
-          #{item.id} {item.text}
-        </span>
-        {current ? (
-          <span className="mt-0.5 block truncate text-muted-foreground">
-            {current}
+        <span className="block truncate" title={title}>
+          <span>
+            #{item.id} {item.text}
           </span>
-        ) : null}
+          {current ? (
+            <span className="ml-1.5 text-muted-foreground">{current}</span>
+          ) : null}
+        </span>
       </span>
     </li>
   );
