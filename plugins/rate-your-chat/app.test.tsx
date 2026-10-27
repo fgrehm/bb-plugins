@@ -474,7 +474,8 @@ describe("archive-only UI", () => {
       },
     );
     await slot.findByRole("dialog");
-    expect(slot.getByText(/Drafted by an agent/)).toBeTruthy();
+    // The dialog mounts before its prefilled draft renders, so wait for content.
+    await slot.findByText(/Drafted by an agent/);
     expect(
       (
         slot.getByRole("radio", {
