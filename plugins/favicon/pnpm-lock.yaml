@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       zod:
-        specifier: ^4.6.2
-        version: 4.6.2
+        specifier: ^4.6.6
+        version: 4.6.6
     devDependencies:
       '@get-bb/plugin-sdk':
         specifier: 0.5.29
@@ -874,8 +874,8 @@ packages:
     engines: {node: '>= 8'}
     hasBin: true
 
-  zod@4.6.2:
-    resolution: {integrity: sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ==}
+  zod@4.6.6:
+    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -902,7 +902,7 @@ snapshots:
   '@get-bb/plugin-sdk@0.5.29(@types/better-sqlite3@9.6.0)(@types/react@19.3.0)(hono@4.13.13)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
     dependencies:
       cross-spawn: 7.0.6
-      zod: 4.6.2
+      zod: 4.6.6
     optionalDependencies:
       '@types/better-sqlite3': 9.6.0
       '@types/react': 19.3.0
@@ -1697,6 +1697,6 @@ snapshots:
     dependencies:
       isexe: 2.0.0
 
-  zod@4.6.2: {}
+  zod@4.6.6: {}
 
   zwitch@2.0.4: {}
