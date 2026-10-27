@@ -1895,6 +1895,73 @@ function ViewedAction({
   );
 }
 
+/**
+ * Keyboard navigation reference. Opens from the review actions menu on any
+ * width (and from the `?` key) as a dialog, so the document never shifts and
+ * the phone and desktop render the same content.
+ */
+function KeyboardShortcutsDialog({
+  open,
+  onOpenChange,
+  pluginId,
+  openerRef,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  pluginId: string;
+  openerRef: React.RefObject<HTMLElement | null>;
+}) {
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay
+          data-bb-plugin={pluginId}
+          data-bb-plugin-root=""
+          data-bb-portaled-overlay=""
+          className="fixed inset-0 z-40 bg-black/40"
+        />
+        <Dialog.Content
+          data-bb-plugin={pluginId}
+          data-bb-plugin-root=""
+          data-bb-portaled-overlay=""
+          onCloseAutoFocus={(event) => {
+            if (!openerRef.current) return;
+            event.preventDefault();
+            openerRef.current.focus();
+          }}
+          className="fixed left-1/2 top-1/2 z-50 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-2xl focus:outline-none"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <Dialog.Title className="text-sm font-semibold">
+              Keyboard shortcuts
+            </Dialog.Title>
+            <Dialog.Close asChild>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Close keyboard shortcuts"
+              >
+                <Icon name="X" />
+              </Button>
+            </Dialog.Close>
+          </div>
+          <Dialog.Description className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            Focus this diff surface, then use j/k for lines, h/l for old/new
+            side, V to start a range, c to comment, [/] for hunks, ,/. for
+            files, m to mark viewed, and ? for help. Navigation never sends
+            feedback.
+          </Dialog.Description>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            Ranges stay on one file and one side. Escape clears a range. Use the
+            Exact range controls for direct multiline line numbers. Tab
+            continues through native controls and out of this surface.
+          </p>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
 function ReviewPanel({ threadId }: { threadId: string }) {
   const rpc = useRpc<typeof rpcContract>();
   const pluginId = experimental_usePluginId();
@@ -1957,6 +2024,7 @@ function ReviewPanel({ threadId }: { threadId: string }) {
   const mobileMoreRef = useRef<HTMLDetailsElement | null>(null);
   const reviewActionsRef = useRef<HTMLDetailsElement | null>(null);
   const compareDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const keyboardHelpOpenerRef = useRef<HTMLElement | null>(null);
   useDismissableDetails(reviewActionsRef);
   useDismissableDetails(compareDetailsRef, Boolean(review));
   const [mobileFileListOpen, setMobileFileListOpen] = useState(false);
@@ -2899,8 +2967,11 @@ function ReviewPanel({ threadId }: { threadId: string }) {
           void markViewed(!viewedPaths.has(file.path), file.path);
       } else if (key === "?") {
         event.preventDefault();
-        setKeyboardHelpOpen((open) => !open);
-        if (mobileMoreRef.current) mobileMoreRef.current.open = true;
+        keyboardHelpOpenerRef.current =
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : (surfaceRefs.current.get(activeSurface ?? "") ?? null);
+        setKeyboardHelpOpen(true);
       }
     },
     [
@@ -3422,22 +3493,6 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     liveCommentHandlers.current = { reply, edit, remove };
   });
 
-  const keyboardShortcutContent = (
-    <>
-      <p>
-        Focus this diff surface, then use j/k for lines, h/l for old/new side, V
-        to start a range, c to comment, [/] for hunks, ,/. for files, m to mark
-        viewed, and ? for help. Navigation never sends feedback.
-      </p>
-      {keyboardHelpOpen ? (
-        <p className="mt-1">
-          Ranges stay on one file and one side. Escape clears a range. Use the
-          Exact range controls for direct multiline line numbers. Tab continues
-          through native controls and out of this surface.
-        </p>
-      ) : null}
-    </>
-  );
   const renderExactRangeControl = (mobile: boolean) => (
     <details
       className={
@@ -3609,6 +3664,17 @@ function ReviewPanel({ threadId }: { threadId: string }) {
     restoreRef: compareRestoreRef,
     onClose: () => setMobileCompareOpen(false),
   });
+
+  function openKeyboardHelp(opener: HTMLElement | null) {
+    keyboardHelpOpenerRef.current =
+      opener ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+    if (reviewActionsRef.current) reviewActionsRef.current.open = false;
+    if (mobileMoreRef.current) mobileMoreRef.current.open = false;
+    setKeyboardHelpOpen(true);
+  }
 
   // Requesting a new snapshot or a refresh from the header disclosure closes
   // it first, so the panel never sits open over the review while it reloads.
@@ -4448,6 +4514,18 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             >
               {review ? "Change review target…" : "Open a review…"}
             </button>
+            <div className="my-1 border-t" />
+            <button
+              type="button"
+              className="block w-full rounded px-2 py-2 text-left text-xs hover:bg-muted"
+              onClick={() =>
+                openKeyboardHelp(
+                  reviewActionsRef.current?.querySelector("summary") ?? null,
+                )
+              }
+            >
+              Keyboard shortcuts
+            </button>
           </div>
         </details>
         <Button
@@ -4588,15 +4666,6 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                 </span>
               </div>
               <div className="flex-1" />
-              <Button
-                size="sm"
-                variant="ghost"
-                className="hidden sm:inline-flex"
-                aria-expanded={keyboardHelpOpen}
-                onClick={() => setKeyboardHelpOpen((open) => !open)}
-              >
-                Keyboard ?
-              </Button>
               <Dialog.Trigger asChild>
                 <Button
                   size="sm"
@@ -5019,25 +5088,16 @@ function ReviewPanel({ threadId }: { threadId: string }) {
 
                         <button
                           type="button"
-                          aria-controls="mobile-keyboard-shortcuts"
-                          aria-expanded={keyboardHelpOpen}
-                          className="mt-1 flex min-h-9 w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
-                          onClick={() => setKeyboardHelpOpen((open) => !open)}
+                          className="mt-1 flex min-h-9 w-full items-center rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                          onClick={() =>
+                            openKeyboardHelp(
+                              mobileMoreRef.current?.querySelector("summary") ??
+                                null,
+                            )
+                          }
                         >
-                          {keyboardHelpOpen
-                            ? "Hide keyboard shortcuts"
-                            : "Keyboard shortcuts"}
-                          <span aria-hidden="true">
-                            {keyboardHelpOpen ? "−" : "+"}
-                          </span>
+                          Keyboard shortcuts
                         </button>
-                        <div
-                          id="mobile-keyboard-shortcuts"
-                          hidden={!keyboardHelpOpen}
-                          className="px-2 pb-2 text-[11px] text-muted-foreground"
-                        >
-                          {keyboardShortcutContent}
-                        </div>
                       </div>
                     </details>
                     <ViewedAction
@@ -5165,11 +5225,6 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                   </div>
                 </div>
                 <div className="p-1.5 sm:p-2 lg:p-4">
-                  {keyboardHelpOpen ? (
-                    <div className="mb-3 rounded border bg-background px-3 py-2 text-[11px] text-muted-foreground">
-                      {keyboardShortcutContent}
-                    </div>
-                  ) : null}
                   {mobileViewport &&
                   selection &&
                   body.trim() &&
@@ -5619,6 +5674,12 @@ function ReviewPanel({ threadId }: { threadId: string }) {
               </Drawer.Portal>
             </Drawer.Root>
           </Dialog.Root>
+          <KeyboardShortcutsDialog
+            open={keyboardHelpOpen}
+            onOpenChange={setKeyboardHelpOpen}
+            pluginId={pluginId}
+            openerRef={keyboardHelpOpenerRef}
+          />
         </>
       )}
       {mobileCompareOpen ? (

@@ -2235,10 +2235,16 @@ describe("Review Workspace app", () => {
     ).toBeNull();
     fireEvent.click(slot.getByRole("button", { name: "Files" }));
     expect(await slot.findByTestId("pierre-diff")).toBeTruthy();
-    fireEvent.click(slot.getByRole("button", { name: "Keyboard ?" }));
-    expect(slot.getAllByText(/Focus this diff surface/).length).toBeGreaterThan(
-      0,
+    const diff = slot.getByRole("region", { name: "File diff" });
+    diff.focus();
+    fireEvent.keyDown(diff, { key: "?" });
+    expect(
+      await slot.findByRole("dialog", { name: "Keyboard shortcuts" }),
+    ).toBeTruthy();
+    fireEvent.click(
+      slot.getByRole("button", { name: "Close keyboard shortcuts" }),
     );
+    await vi.waitFor(() => expect(document.activeElement).toBe(diff));
     slot.lifecycle.unmount();
   });
 
@@ -4277,6 +4283,48 @@ describe("review target picker (specific commit)", () => {
         { reviewId: review.id, filePath: "src/example.ts", viewed: true },
       ]),
     );
+    slot.lifecycle.unmount();
+  });
+
+  it("opens keyboard shortcuts from the actions menu and restores focus", async () => {
+    const app = await loadPluginApp(() => import("./app"));
+    const slot = renderSlot(
+      app.navPanels[0]!,
+      { subPath: "review/thread-ui" },
+      {
+        context: { projectId: "project-ui", threadId: "thread-ui" },
+        rpc: {
+          review: async () => ({ review: reviewFixture() }),
+          revisions: async () => ({ revisions: [] }),
+        } as any,
+      },
+    );
+    await slot.findByTestId("pierre-diff");
+    const summary = slot.getByLabelText("Review actions");
+    fireEvent.click(summary);
+    // The document toolbar's More menu has a trigger with the same name; scope
+    // to the actions menu the click just opened.
+    const actions = summary.closest("details")!;
+    fireEvent.click(
+      within(actions as HTMLElement).getByRole("button", {
+        name: "Keyboard shortcuts",
+      }),
+    );
+    expect(
+      await slot.findByRole("dialog", { name: "Keyboard shortcuts" }),
+    ).toBeTruthy();
+    expect(slot.getAllByText(/Focus this diff surface/).length).toBeGreaterThan(
+      0,
+    );
+    fireEvent.click(
+      slot.getByRole("button", { name: "Close keyboard shortcuts" }),
+    );
+    await vi.waitFor(() =>
+      expect(
+        slot.queryByRole("dialog", { name: "Keyboard shortcuts" }),
+      ).toBeNull(),
+    );
+    await vi.waitFor(() => expect(document.activeElement).toBe(summary));
     slot.lifecycle.unmount();
   });
 });

@@ -8,6 +8,7 @@
 - Mark the current file viewed from the desktop sticky toolbar, so marking no longer requires scrolling back to the file header.
 - Show a compact revision label (target and time) in the rail, with the full timestamp and comment count in its tooltip.
 - Keep the changed file name visible in the document toolbar while its directory truncates.
+- Open the keyboard reference from the `•••` menu or the `?` key in a dialog, instead of a `Keyboard ?` button that pushed the document down.
 - Render tour narrative notes and the tour overview as Markdown, so notes show inline code, lists, and links.
 - Capture large changesets: a snapshot with 100 changed files still records every patch.
 - Review on a phone with a bottom-sheet comment composer that shows the file and line context it is anchored to; dismissing the sheet with a typed draft keeps it anchored behind a "Resume draft" banner.
