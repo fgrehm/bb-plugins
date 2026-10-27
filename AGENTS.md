@@ -68,19 +68,16 @@ Author store copy in `plugins/<id>/PLUGIN_OVERVIEW.md`, not directly in the cata
 
 This catalog uses Git SemVer ranges with plugin-specific tags. For each entry, `source.git.url` points to this repository, `subdir` is `plugins/<id>`, and `tagPrefix` is `<id>/`. Keep the range compatible with intended releases; for example, `^0.1.0` admits `0.1.x` tags, not `0.2.0`.
 
-## Releasing a catalogued plugin
+## Publishing a catalogued plugin
 
-Plugins are versioned independently in this monorepo and are not published to npm. For the first release use `0.1.0`; later releases update only the selected plugin's `package.json` version and `CHANGELOG.md`. Keep pending changes under `## [Unreleased]`; when preparing a release, move those notes into a `## [<version>] - YYYY-MM-DD` section. Keep the marketplace short description and overview aligned with actual behavior, and widen the catalog range only when the release policy should admit a new version line.
+Plugins are not published to npm. Catalog entries track `main` with a per-plugin `subdir`, so pushing to `main` is the release: `bb plugin outdated` compares each installed plugin's commit with the branch head, and `bb plugin update` moves to it. There are no per-plugin tags and no GitHub Release to cut.
 
-Before tagging, commit and push the reviewed release changes to `main`, run the plugin's typecheck, tests, formatter, and `bb plugin build`, then run `prek run --all-files` and `git diff --check`. Create an annotated signed tag for the exact release commit, verify it locally, and push the tag only after explicit approval:
+Because a push is installable everywhere immediately, `main` must stay green. Land changes only when the plugin's typecheck, tests, formatter, and `bb plugin build` pass, plus `prek run --all-files` and a clean `git diff --check`. CI on the tip is the gate for running `bb plugin update --all` on other machines.
 
-```sh
-git tag -s favicon/v0.1.0 -m "favicon v0.1.0"
-git verify-tag favicon/v0.1.0
-git push origin favicon/v0.1.0
-```
+Record what changed anyway:
 
-Use the corresponding plugin ID and version in the tag and message. The signing key must be registered with GitHub so the signature is verifiable there; see [GitHub's tag-signing guide](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-tags). The release workflow reruns the full CI matrix, requires GitHub to verify the annotated tag signature, extracts that version's section from `plugins/<id>/CHANGELOG.md` as the GitHub Release notes, and creates a release without assets. BB installs and updates from the Git tag selected by the marketplace range; it does not consume the GitHub Release page.
+- Bump `package.json` `version` and move `CHANGELOG.md` notes from `## [Unreleased]` into a `## [<version>] - YYYY-MM-DD` section when a change is worth naming. Ref installs compare commits, not versions, so this is documentation rather than a release gate.
+- Keep `bb.description` (about 140 characters or fewer), `PLUGIN_OVERVIEW.md`, the catalog entry, and the root README aligned, then run the overview sync.
 
 ## New-plugin checklist
 

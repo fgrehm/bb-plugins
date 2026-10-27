@@ -8,28 +8,34 @@ This is personal software: I build these plugins primarily for my own use and sh
 
 ## Install
 
-> **Pre-release:** No versioned releases or npm packages have been published yet. The marketplace catalog is present for future releases, but plugins should currently be installed directly from the repository for testing.
+Add the catalog once per machine, then install plugins by id:
 
-Install a plugin from the latest `main` branch:
+```sh
+bb marketplace add git:github.com/fgrehm/bb-plugins@main
+bb plugin install attention@fgrehm-plugins
+```
+
+Available ids: `attention`, `favicon`, `pi-extras`, `rate-your-chat`, `review-workspace`, `rpiv-todo`.
+
+Catalog entries track the `main` branch, so updates are the same on every machine:
+
+```sh
+bb plugin outdated
+bb plugin update --all
+```
+
+A single plugin can still be installed directly, without the catalog:
 
 ```sh
 bb plugin install git:github.com/fgrehm/bb-plugins@main --subdirectory plugins/pi-extras
-bb plugin install git:github.com/fgrehm/bb-plugins@main --subdirectory plugins/favicon
-bb plugin install git:github.com/fgrehm/bb-plugins@main --subdirectory plugins/review-workspace
 ```
 
-These are full-trust, pre-release plugins. Review the source before installing. BB records the Git source and plugin subdirectory so updates and removal continue to work normally.
+These are full-trust, pre-release plugins. Review the source before installing. BB records the resolved commit so updates and removal keep working.
 
-For local development, clone the repository and install a plugin by path:
+For local development, clone the repository and install a plugin by path, or use `bb plugin dev` for live rebuilds:
 
 ```sh
 bb plugin install path:/path/to/bb-plugins/plugins/<id>
-```
-
-Once versioned releases exist, the marketplace can be added with:
-
-```sh
-bb marketplace add https://raw.githubusercontent.com/fgrehm/bb-plugins/main/marketplace.json
 ```
 
 The catalog uses marketplace schema v2, so BB versions that only support v1 catalogs cannot read it.
@@ -59,16 +65,18 @@ turns, markers for your own inputs, and bands for structured questions waiting
 on an answer, with running-turn concurrency and input density below. Reads BB's
 thread history through the public SDK and computes on demand; it does not read
 message bodies, tool arguments, or tool output. A turn is execution time, not
-useful work, and BB records no reading or focus. This experiment is not in the
-marketplace catalog; install from a local checkout to try it.
-
+useful work, and BB records no reading or focus.
 ### [Rate Your Chat](plugins/rate-your-chat) - `rate-your-chat`
 
-Skippable whole-chat feedback offered after archiving. Stores usefulness, use case, notes, and recorded model/reasoning variations in local SQLite, with editing and JSON export. No feedback is sent to providers. This experiment is not in the marketplace catalog; install from a local checkout to try it.
+Skippable whole-chat feedback offered after archiving. Stores usefulness, use case, notes, and recorded model/reasoning variations in local SQLite, with editing and JSON export. No feedback is sent to providers.
+
+### [RPIV Todo](plugins/rpiv-todo) - `rpiv-todo`
+
+Shows a Pi agent's to-do list above the thread's composer in BB's native to-do card: an `N/M complete` header, a spinner on the active step, in-progress first. The agent owns the list and the plugin only reads it, rebuilding it from the thread's `todo` tool calls because BB's own panel does not recognize Pi's tool. Needs `npm:@juicesharp/rpiv-todo` installed in Pi and a new session for the tool to load.
 
 ## Repo layout
 
-Each plugin is self-contained under `plugins/<id>/` with its own `package.json` and lockfile (pnpm). [`marketplace.json`](marketplace.json) at the root is the published v2 catalog BB reads. Its `overview` fields are generated from each catalogued plugin's `PLUGIN_OVERVIEW.md`; other catalog metadata stays hand-authored. Plugin releases are resolved from git tags like `favicon/v0.1.0` (plugin-specific prefix per catalog entry).
+Each plugin is self-contained under `plugins/<id>/` with its own `package.json` and lockfile (pnpm). [`marketplace.json`](marketplace.json) at the root is the published v2 catalog BB reads. Its `overview` fields are generated from each catalogued plugin's `PLUGIN_OVERVIEW.md`; other catalog metadata stays hand-authored. Catalog entries point at `main` with a per-plugin `subdir`, so `bb plugin outdated` compares the installed commit with the branch head; there are no release tags to manage.
 
 ## Marketplace copy
 

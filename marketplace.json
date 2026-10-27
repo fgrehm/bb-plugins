@@ -6,18 +6,123 @@
   "description": "Plugins I maintain for bb.",
   "plugins": [
     {
+      "id": "attention",
+      "displayName": "Attention",
+      "description": "A day timeline of agent turns, your inputs, and waiting questions across BB threads.",
+      "icon": "Clock",
+      "tags": [
+        "timeline",
+        "activity",
+        "attention",
+        "threads"
+      ],
+      "author": {
+        "name": "Fabio Rehm",
+        "github": "fgrehm",
+        "url": "https://github.com/fgrehm"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/fgrehm/bb-plugins.git",
+          "subdir": "plugins/attention",
+          "ref": "main"
+        }
+      },
+      "overview": "See one day of work with coding agents as a timeline: when agents executed, when\nyou stepped in, and when an agent was waiting for your answer.\n\n## What you get\n\n- **A day picker that only enables days with recorded activity.**\n- **The shape of the day**: a half-hour heat strip of agent activity with your\n  inputs along its base.\n- **One row per thread** on a single clock: turn bands, your input ticks, an\n  activity span, and structured requests waiting for an answer. Subthreads are\n  nested under their parent, collapsed by default, and included in every\n  total.\n- **Rhythm**: agent-minutes and your inputs per hour on the same axis.\n- **Busiest recorded windows**: the half hours where you stepped in most, with\n  agent time as the tie-break.\n- **Thread cards** for the busiest eight, each with a miniature timeline and\n  agent time, turns, inputs, and requests.\n- **Agent requests** with thread, wait, and outcome, collapsed until opened.\n- **Thread family history** from day thread cards: follow a parent and descendants across days, with adjustable recorded visits, input ticks, request openings, and agent execution. Inspect visits and waits or choose a date window; calendar totals stay unchanged.\n- **Week and Month views** with a daily heatmap, daily rhythm, busiest days, and\n  top threads; click a day to open its timeline.\n- **Estimated human time** for the day or range: interacting plus switching\n  time, with adjustable per-item assumptions saved locally.\n- Failed and interrupted turns, archived threads, and automated inputs are\n  marked rather than blended in.\n\nThe page answers a narrow question: did parallel agents run on their own, or did\nthey keep pulling you back in? It reports recorded activity, not a productivity\nor attention score.\n\n## Requirements and privacy\n\nRequires BB 0.46 or newer. The plugin reads BB's own thread history through the\npublic SDK and computes everything on demand. It does not read message bodies,\ntool arguments, or tool output, writes nothing to BB, and makes no network\nrequests. Nothing leaves your machine.\n\n## Limits\n\nA turn is provider execution time, not useful work. \"You\" means a local caller\nwithout a sender thread, so the desktop UI and an external script look the same.\nBB records no reading or focus, so thread switches are changes between your\nrecorded inputs, not changes in attention. Only structured agent requests, including approvals, are\nshown. The human-time figure is an assumption-based estimate, not measured\nattention. Queued messages are timed at dispatch, and per-turn token history is not\nretained. Archived threads are included; deleted threads are gone.\n\n## Caching and limits\n\nDay and range reports are cached in the plugin server for five minutes and in\nthe page for the session. Today and ranges that include today are recomputed.\nRefresh bypasses both caches. Ranges are limited to 62 days. Family reads are uncached, limited to 80 members and 30 event pages per member, and show coverage warnings. Family date windows cover at most 366 days. Visits group nearby recorded inputs, not measured focus or attention; unrelated-thread interruptions are not shown."
+    },
+    {
+      "id": "favicon",
+      "displayName": "Favicon",
+      "description": "Replaces the browser tab favicon with uploaded light/dark SVG artwork.",
+      "icon": "Image",
+      "tags": [
+        "favicon",
+        "ui",
+        "branding"
+      ],
+      "author": {
+        "name": "Fabio Rehm",
+        "github": "fgrehm",
+        "url": "https://github.com/fgrehm"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/fgrehm/bb-plugins.git",
+          "subdir": "plugins/favicon",
+          "ref": "main"
+        }
+      },
+      "screenshots": [
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/favicon/docs/settings.webp"
+      ],
+      "overview": "Favicon replaces the BB browser tab icon with separate SVG artwork for light and dark themes. The settings panel previews the artwork with BB's fixed 55% color tint, preserving shading and detail while keeping the unread badge visible. Uploads and removals stay pending until you choose Save and apply, so you can review both previews before changing the active icon. Each theme can be updated independently.\n\n## Requirements and limits\n\nArtwork must be uploaded as SVG; remote URLs and filesystem paths are not supported. The favicon applies to the BB window, not individual projects. The plugin restores the previous favicon when disabled or reloaded. No external service or account is required."
+    },
+    {
+      "id": "pi-extras",
+      "displayName": "Pi Extras",
+      "description": "Shows Pi usage, manages global Pi settings and updates, and generates thread titles and commit messages when selected for each task.",
+      "icon": "ChartNoAxesCombined",
+      "tags": [
+        "usage",
+        "provider",
+        "credentials"
+      ],
+      "author": {
+        "name": "Fabio Rehm",
+        "github": "fgrehm",
+        "url": "https://github.com/fgrehm"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/fgrehm/bb-plugins.git",
+          "subdir": "plugins/pi-extras",
+          "ref": "main"
+        }
+      },
+      "screenshots": [
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/sessions.webp",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/subscriptions.webp",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/settings.webp",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/model-scope.webp",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/runtime-settings.webp",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/text-services.webp"
+      ],
+      "overview": "Pi Extras brings Pi usage and settings into BB. Its Sessions view estimates token use and cost from local Pi session transcripts, broken down by backend, model, project, and day. Subscriptions shows current usage for Pi-managed Codex, OpenCode Go, and Ollama Cloud accounts. Pi's newer `openai` Sign in with ChatGPT credential can authorize eligible Responses API inference, but OpenAI rejects it at the ChatGPT usage endpoint, so Codex usage needs Pi's separately offered `OpenAI Codex (legacy)` sign-in; the plugin says so in the card and links to ChatGPT settings otherwise.\n\nThe settings panel edits Pi defaults, model scope, selected runtime settings, model catalogs, and extensions. For Pi to generate BB thread titles or commit messages, select Pi separately for each task under BB Settings > AI services. This does not change the model running the thread.\n\n## Requirements and privacy\n\nPi must be installed on BB's primary machine. Subscription usage requires the relevant credentials in Pi's auth.json. Codex usage requires Pi's `openai-codex` credential and account ID, which Pi offers as the `OpenAI Codex (legacy)` sign-in; Pi's newer `openai` SIWC credential does not provide access to Codex usage totals. The plugin reads credentials to request usage but never displays, logs, refreshes, or modifies them. Subscription endpoints are undocumented and may change."
+    },
+    {
+      "id": "rate-your-chat",
+      "displayName": "Rate Your Chat",
+      "description": "Local whole-chat feedback with recorded model and reasoning variations for later analysis.",
+      "icon": "Star",
+      "tags": [
+        "feedback",
+        "ratings",
+        "local",
+        "analysis"
+      ],
+      "author": {
+        "name": "Fabio Rehm",
+        "github": "fgrehm",
+        "url": "https://github.com/fgrehm"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/fgrehm/bb-plugins.git",
+          "subdir": "plugins/rate-your-chat",
+          "ref": "main"
+        }
+      },
+      "screenshots": [
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/rate-your-chat/assets/screenshots/archive-rating.png",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/rate-your-chat/assets/screenshots/chat-ratings.png"
+      ],
+      "overview": "Rate Your Chat asks for feedback on a chat once you archive it, then keeps that feedback beside the model and reasoning level you used, so you can compare how different setups did. Nothing is sent anywhere: ratings live in the plugin's own database on your BB server, and only a local export leaves the machine.\n\n## What you get\n\n- An optional rating dialog after an archive, skippable and never blocking the archive itself. Usefulness runs from 1 to 5, with one or more use cases and an optional note.\n- Recorded model and reasoning variations captured when you save, including provider fallbacks, plus a count of how often each combination was used.\n- A **Chat ratings** page in the sidebar for reading, editing, deleting, and exporting feedback, one editable rating per chat and shared across BB clients.\n- Agent-drafted retros that wait above the list for you to confirm or discard; confirming one becomes the chat's rating.\n\n## Requirements and limits\n\nNo account, API key, or outside service. Ratings and prompts stay in the plugin's SQLite store on the BB server, and a prompt survives a plugin reload. Capture reflects the history BB recorded, so missing legacy metadata is marked partial and provider-internal routing is not visible. Archives made before installation, or while the plugin was disabled, are not backfilled. A retro is only drafted when you ask the agent for one."
+    },
+    {
       "id": "review-workspace",
       "displayName": "Review Workspace",
       "description": "Diff-first asynchronous review workspaces inside BB threads.",
-      "overview": "Review Workspace opens a diff-first review panel in a BB thread with two reading modes. Files shows changed files in one continuous document, with jump navigation, inline and whole-file feedback, independent collapse controls, and explicit viewed state. Tour combines explanation and exact code excerpts in logical sections that can cross files, with a table of contents and links back to full diffs. Both modes share the same revision-scoped comments. Create immutable snapshots of uncommitted changes, a selected commit, committed changes against a base branch, or all changes against a base branch, with the base branch suggested from the thread's environment and one-click comparisons against it. Navigate with Vim-style keys or enter any exact visible old/new line range. Compare against each file's latest explicitly viewed revision, add file-level feedback or an overall review note, and send unsent unresolved comments only when requested. Unresolved comment threads and the review note carry forward when you refresh; tours and their exact anchors stay with their original revision.\n\nResume existing reviews from the sidebar's Recent reviews page, with the latest saved snapshot per thread, pending-comment counts, and viewed-file progress. Opening a review or reloading this list does not refresh the diff or send feedback.\n\n## Requirements and limits\n\nThe review uses Git changes available in the thread environment. Large and generated diffs load on demand. Safe raster previews use immutable captured image bytes; other binary files remain file-level only. Agent-authored tour cards are explanatory and are labeled as unverified where appropriate. Review feedback is sent to the agent in the thread only after explicit confirmation.\n\nReview data, including unsent feedback, is automatically and irreversibly purged after seven days continuously archived or when its BB thread is deleted. Existing archives are included. Cleanup runs on load and hourly while enabled, in bounded batches; active reviews and comments already imported into other threads are retained.",
       "icon": "GitPullRequest",
-      "screenshots": [
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/review-diff.png",
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/review-tour.png",
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/review-comment.png",
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/review-feedback.png",
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/recent-reviews.png"
-      ],
       "tags": [
         "review",
         "diff",
@@ -33,29 +138,28 @@
         "git": {
           "url": "https://github.com/fgrehm/bb-plugins.git",
           "subdir": "plugins/review-workspace",
-          "range": "^0.1.0",
-          "tagPrefix": "review-workspace/"
+          "ref": "main"
         }
-      }
+      },
+      "screenshots": [
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/review-diff.png",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/review-tour.png",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/review-comment.png",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/review-feedback.png",
+        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/review-workspace/assets/screenshots/recent-reviews.png"
+      ],
+      "overview": "Review Workspace opens a diff-first review panel in a BB thread with two reading modes. Files shows changed files in one continuous document, with jump navigation, inline and whole-file feedback, independent collapse controls, and explicit viewed state. Tour combines explanation and exact code excerpts in logical sections that can cross files, with a table of contents and links back to full diffs. Both modes share the same revision-scoped comments. Create immutable snapshots of uncommitted changes, a selected commit, committed changes against a base branch, or all changes against a base branch, with the base branch suggested from the thread's environment and one-click comparisons against it. Navigate with Vim-style keys or enter any exact visible old/new line range. Compare against each file's latest explicitly viewed revision, add file-level feedback or an overall review note, and send unsent unresolved comments only when requested. Unresolved comment threads and the review note carry forward when you refresh; tours and their exact anchors stay with their original revision.\n\nResume existing reviews from the sidebar's Recent reviews page, with the latest saved snapshot per thread, pending-comment counts, and viewed-file progress. Opening a review or reloading this list does not refresh the diff or send feedback.\n\n## Requirements and limits\n\nThe review uses Git changes available in the thread environment. Large and generated diffs load on demand. Safe raster previews use immutable captured image bytes; other binary files remain file-level only. Agent-authored tour cards are explanatory and are labeled as unverified where appropriate. Review feedback is sent to the agent in the thread only after explicit confirmation.\n\nReview data, including unsent feedback, is automatically and irreversibly purged after seven days continuously archived or when its BB thread is deleted. Existing archives are included. Cleanup runs on load and hourly while enabled, in bounded batches; active reviews and comments already imported into other threads are retained."
     },
     {
-      "id": "pi-extras",
-      "displayName": "Pi Extras",
-      "description": "Shows Pi usage, manages global Pi settings and updates, and generates thread titles and commit messages when selected for each task.",
-      "overview": "Pi Extras brings Pi usage and settings into BB. Its Sessions view estimates token use and cost from local Pi session transcripts, broken down by backend, model, project, and day. Subscriptions shows current usage for Pi-managed Codex, OpenCode Go, and Ollama Cloud accounts. Pi's newer `openai` Sign in with ChatGPT credential can authorize eligible Responses API inference, but OpenAI rejects it at the ChatGPT usage endpoint, so Codex usage needs Pi's separately offered `OpenAI Codex (legacy)` sign-in; the plugin says so in the card and links to ChatGPT settings otherwise.\n\nThe settings panel edits Pi defaults, model scope, selected runtime settings, model catalogs, and extensions. For Pi to generate BB thread titles or commit messages, select Pi separately for each task under BB Settings > AI services. This does not change the model running the thread.\n\n## Requirements and privacy\n\nPi must be installed on BB's primary machine. Subscription usage requires the relevant credentials in Pi's auth.json. Codex usage requires Pi's `openai-codex` credential and account ID, which Pi offers as the `OpenAI Codex (legacy)` sign-in; Pi's newer `openai` SIWC credential does not provide access to Codex usage totals. The plugin reads credentials to request usage but never displays, logs, refreshes, or modifies them. Subscription endpoints are undocumented and may change.",
-      "icon": "ChartNoAxesCombined",
-      "screenshots": [
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/sessions.webp",
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/subscriptions.webp",
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/settings.webp",
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/model-scope.webp",
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/runtime-settings.webp",
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/pi-extras/docs/text-services.webp"
-      ],
+      "id": "rpiv-todo",
+      "displayName": "RPIV Todo",
+      "description": "Shows Pi's rpiv-todo list in BB's to-do card, rebuilt from the thread's todo tool calls.",
+      "icon": "ListTodo",
       "tags": [
-        "usage",
-        "provider",
-        "credentials"
+        "todo",
+        "tasks",
+        "pi",
+        "composer"
       ],
       "author": {
         "name": "Fabio Rehm",
@@ -65,39 +169,11 @@
       "source": {
         "git": {
           "url": "https://github.com/fgrehm/bb-plugins.git",
-          "subdir": "plugins/pi-extras",
-          "range": "^0.1.0",
-          "tagPrefix": "pi-extras/"
+          "subdir": "plugins/rpiv-todo",
+          "ref": "main"
         }
-      }
-    },
-    {
-      "id": "favicon",
-      "displayName": "Favicon",
-      "description": "Replaces the browser tab favicon with uploaded light/dark SVG artwork.",
-      "overview": "Favicon replaces the BB browser tab icon with separate SVG artwork for light and dark themes. The settings panel previews the artwork with BB's fixed 55% color tint, preserving shading and detail while keeping the unread badge visible. Uploads and removals stay pending until you choose Save and apply, so you can review both previews before changing the active icon. Each theme can be updated independently.\n\n## Requirements and limits\n\nArtwork must be uploaded as SVG; remote URLs and filesystem paths are not supported. The favicon applies to the BB window, not individual projects. The plugin restores the previous favicon when disabled or reloaded. No external service or account is required.",
-      "icon": "Image",
-      "screenshots": [
-        "https://raw.githubusercontent.com/fgrehm/bb-plugins/main/plugins/favicon/docs/settings.webp"
-      ],
-      "tags": [
-        "favicon",
-        "ui",
-        "branding"
-      ],
-      "author": {
-        "name": "Fabio Rehm",
-        "github": "fgrehm",
-        "url": "https://github.com/fgrehm"
       },
-      "source": {
-        "git": {
-          "url": "https://github.com/fgrehm/bb-plugins.git",
-          "subdir": "plugins/favicon",
-          "range": "^0.1.0",
-          "tagPrefix": "favicon/"
-        }
-      }
+      "overview": "RPIV Todo puts Pi's own to-do list above the thread's composer, using BB's native to-do card: an `N/M complete` header, a spinner on the active step, pending steps squared, and the list sorted in-progress first. The agent owns the list; you only read it.\n\nBB draws that panel for Cursor `TodoWrite` and Claude `TaskCreate`/`TaskUpdate` from a field plugin UI cannot write. Pi's extension tool is named `todo` and is not on that list, so this plugin rebuilds the list from the thread's completed `todo` tool calls and renders it with the same chrome. It is read-only: it stores nothing on disk, writes nothing, and makes no network requests.\n\n## Requirements and limits\n\nBoth halves are needed. Install `npm:@juicesharp/rpiv-todo` in Pi, then start a new session so the `todo` tool loads; without it the card never appears. The list is reconstructed from tool calls because BB does not persist the extension's own snapshot, so a failed tool call is skipped, and a thread longer than 20,000 events can lose its earliest tasks. The reducer mirrors `@juicesharp/rpiv-todo` 2.15.0, so both should be updated together."
     }
   ]
 }

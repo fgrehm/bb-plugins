@@ -15,7 +15,7 @@
   },
   "bb": {
     "name": "RPIV Todo",
-    "description": "Shows Pi rpiv-todo tasks in BB's composer to-do list. Reconstructs the live list from todo tool calls because BB only special-cases TodoWrite and Claude Task* tools.",
+    "description": "Shows Pi's rpiv-todo list in BB's to-do card, rebuilt from the thread's todo tool calls.",
     "branding": {
       "icon": "./assets/icon.svg"
     },
