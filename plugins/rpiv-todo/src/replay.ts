@@ -68,13 +68,13 @@ export function replayTodoArgs(
 ): TaskState {
   let state: TaskState = { tasks: [], nextId: EMPTY_STATE.nextId };
   for (const args of calls) {
-    const next = applyArgs(state, args);
-    if (next) state = next;
+    state = applyTodoCall(state, args) ?? state;
   }
   return state;
 }
 
-function applyArgs(
+/** Apply one completed `todo` call, or null when the extension would reject it. */
+export function applyTodoCall(
   state: TaskState,
   args: Record<string, unknown>,
 ): TaskState | null {

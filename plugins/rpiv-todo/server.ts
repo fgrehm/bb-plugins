@@ -1,8 +1,9 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { rpcContract } from "./src/contract";
-import { snapshotForThread } from "./src/snapshot";
+import { createTodoSnapshots } from "./src/snapshot";
 
 export default function plugin(bb: BbPluginApi) {
+  const snapshots = createTodoSnapshots(bb);
   bb.settings.define({
     expandOnEnter: {
       type: "boolean",
@@ -15,7 +16,7 @@ export default function plugin(bb: BbPluginApi) {
 
   bb.rpc.register(rpcContract, {
     getTodos({ threadId }) {
-      return snapshotForThread(bb, threadId);
+      return snapshots.get(threadId);
     },
   });
 

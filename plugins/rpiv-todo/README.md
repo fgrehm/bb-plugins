@@ -34,10 +34,12 @@ Off keeps only the `N/M complete` header until you expand it.
 
 ## How it works, and its limits
 
-The plugin is read-only. It reads the thread's event log, replays completed `todo` tool calls through a copy of the extension's reducer (single and batch create, update, delete, clear, legal status transitions, `blockedBy` and cycle checks, `nextId` alignment), and serves the result over RPC. It stores nothing, writes nothing, and makes no network requests.
+The plugin is read-only. It reads the thread's event log, replays completed `todo` tool calls through a copy of the extension's reducer (single and batch create, update, delete, clear, legal status transitions, `blockedBy` and cycle checks, `nextId` alignment), and serves the result over RPC. It stores nothing on disk, writes nothing, and makes no network requests.
+
+Each thread's replayed state is cached in memory with the last event sequence it consumed, so a poll asks one one-row probe and then only the events newer than that. The first read of a thread still pages through its history, and a rewritten event log restarts the replay. The cache holds 64 threads and is dropped when the plugin reloads.
 
 - BB does not persist the extension's own `details.tasks` snapshot, so the list is reconstructed from tool calls. A failed tool result is skipped.
-- It scans up to 20,000 events, paging 100 at a time, so a very long thread can lose its earliest tasks.
+- The first read of a thread scans up to 20,000 events, paging 100 at a time, so a very long thread can lose its earliest tasks.
 - The reducer mirrors `@juicesharp/rpiv-todo` 2.15.0. If that package changes its rules, this plugin can drift. Keep both updated together.
 
 ## Fork
