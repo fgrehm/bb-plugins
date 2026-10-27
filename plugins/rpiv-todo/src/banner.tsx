@@ -50,21 +50,23 @@ function StatusGlyph({ status }: { status: TodoItem["status"] }) {
 function TodoRow({ item }: { item: TodoItem }) {
   const active = item.status === "in_progress";
   const current = active && item.activeForm ? item.activeForm : null;
-  const title = current ? `${item.text} — ${current}` : item.text;
   return (
     <li
       className={`flex min-w-0 items-start gap-2 text-xs ${active ? "text-foreground" : "text-muted-foreground"}`}
     >
       <StatusGlyph status={item.status} />
-      <span className="min-w-0 flex-1" title={title}>
-        <span className="block truncate" title={title}>
-          <span>
-            #{item.id} {item.text}
+      <span
+        className="min-w-0 flex-1 truncate"
+        title={`#${item.id} ${item.text}${current ? ` — ${current}` : ""}`}
+      >
+        #{item.id}{" "}
+        {current ? (
+          <span className="rounded-sm bg-primary/15 px-1 font-medium text-primary">
+            {current}
           </span>
-          {current ? (
-            <span className="ml-1.5 text-muted-foreground">{current}</span>
-          ) : null}
-        </span>
+        ) : (
+          item.text
+        )}
       </span>
     </li>
   );

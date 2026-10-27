@@ -29,7 +29,7 @@ Off keeps only the `N/M complete` header until you expand it.
 ## What you see
 
 - A card above the composer, collapsed or expanded, with `N/M complete` and the active step's `activeForm` in the header.
-- Completed steps checked, the active step spinning, pending steps squared.
+- Completed steps checked, the active step spinning with its `activeForm` highlighted in place of the task title, pending steps squared.
 - Deleted tasks hidden; `clear` empties the card.
 
 ## How it works, and its limits

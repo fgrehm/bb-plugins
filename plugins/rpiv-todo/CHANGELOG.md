@@ -2,6 +2,7 @@
 
 ## 2026-10-27
 
+- The active step shows its `activeForm` where its title would be, highlighted in the theme's primary color, so the running step stands out from the completed ones.
 - Fork of [`bb-rpiv-todo-renderer`](https://github.com/ZhenHuangLab/bb-rpiv-todo-renderer) 0.1.2 (MIT): shows Pi's `todo` tool calls in BB's composer to-do card, updating as the agent works.
 - Shows the whole list when the agent creates it in a single batch call.
 - Keeps a completed task completed.
