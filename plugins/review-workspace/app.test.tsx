@@ -4300,6 +4300,13 @@ describe("review target picker (specific commit)", () => {
       },
     );
     await slot.findByTestId("pierre-diff");
+    // Phones do not offer keyboard shortcuts, so the More menu has no item.
+    const more = slot.getByLabelText("More diff controls").closest("details")!;
+    expect(
+      within(more as HTMLElement).queryByRole("button", {
+        name: "Keyboard shortcuts",
+      }),
+    ).toBeNull();
     const summary = slot.getByLabelText("Review actions");
     fireEvent.click(summary);
     // The document toolbar's More menu has a trigger with the same name; scope

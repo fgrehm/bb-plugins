@@ -3672,7 +3672,6 @@ function ReviewPanel({ threadId }: { threadId: string }) {
         ? document.activeElement
         : null);
     if (reviewActionsRef.current) reviewActionsRef.current.open = false;
-    if (mobileMoreRef.current) mobileMoreRef.current.open = false;
     setKeyboardHelpOpen(true);
   }
 
@@ -4514,10 +4513,10 @@ function ReviewPanel({ threadId }: { threadId: string }) {
             >
               {review ? "Change review target…" : "Open a review…"}
             </button>
-            <div className="my-1 border-t" />
+            <div className="my-1 hidden border-t lg:block" />
             <button
               type="button"
-              className="block w-full rounded px-2 py-2 text-left text-xs hover:bg-muted"
+              className="hidden w-full rounded px-2 py-2 text-left text-xs hover:bg-muted lg:block"
               onClick={() =>
                 openKeyboardHelp(
                   reviewActionsRef.current?.querySelector("summary") ?? null,
@@ -5085,19 +5084,6 @@ function ReviewPanel({ threadId }: { threadId: string }) {
                             ) : null}
                           </div>
                         </details>
-
-                        <button
-                          type="button"
-                          className="mt-1 flex min-h-9 w-full items-center rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
-                          onClick={() =>
-                            openKeyboardHelp(
-                              mobileMoreRef.current?.querySelector("summary") ??
-                                null,
-                            )
-                          }
-                        >
-                          Keyboard shortcuts
-                        </button>
                       </div>
                     </details>
                     <ViewedAction
