@@ -1,0 +1,48 @@
+[data-bb-chat-timestamp]::before {
+  color: var(--muted-foreground);
+  content: attr(data-bb-chat-timestamp);
+  flex: 0 0 auto;
+  font-size: 0.6875rem;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.25rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+  white-space: nowrap;
+}
+
+.group\/message:hover [data-bb-chat-timestamp]::before,
+.group\/message:focus-within [data-bb-chat-timestamp]::before,
+.group\/message[data-bb-chat-timestamp]:hover::before,
+.group\/message[data-bb-chat-timestamp]:focus-within::before,
+.group\/timeline-row:hover [data-bb-chat-timestamp]::before,
+.group\/timeline-row:focus-within [data-bb-chat-timestamp]::before {
+  opacity: 1;
+}
+
+.group\/message[data-bb-chat-timestamp]::before {
+  display: block;
+  margin-top: 0.125rem;
+}
+
+.group\/message.ml-auto[data-bb-chat-timestamp]::before {
+  text-align: right;
+}
+
+.group\/timeline-row > [data-bb-chat-timestamp]::before {
+  margin-left: 0.25rem;
+}
+
+/* Touch screens have no hover, and BB shows message actions there already. */
+@media (hover: none), (pointer: coarse) {
+  [data-bb-chat-timestamp]::before {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-bb-chat-timestamp]::before {
+    transition: none;
+  }
+}

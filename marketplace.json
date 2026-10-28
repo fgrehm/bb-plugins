@@ -90,6 +90,31 @@
       "overview": "Pi Extras brings Pi usage and settings into BB. Its Sessions view estimates token use and cost from local Pi session transcripts, broken down by backend, model, project, and day. Subscriptions shows current usage for Pi-managed Codex, OpenCode Go, and Ollama Cloud accounts. Pi's newer `openai` Sign in with ChatGPT credential can authorize eligible Responses API inference, but OpenAI rejects it at the ChatGPT usage endpoint, so Codex usage needs Pi's separately offered `OpenAI Codex (legacy)` sign-in; the plugin says so in the card and links to ChatGPT settings otherwise.\n\nThe settings panel edits Pi defaults, model scope, selected runtime settings, model catalogs, and extensions. For Pi to generate BB thread titles or commit messages, select Pi separately for each task under BB Settings > AI services. This does not change the model running the thread.\n\n## Requirements and privacy\n\nPi must be installed on BB's primary machine. Subscription usage requires the relevant credentials in Pi's auth.json. Codex usage requires Pi's `openai-codex` credential and account ID, which Pi offers as the `OpenAI Codex (legacy)` sign-in; Pi's newer `openai` SIWC credential does not provide access to Codex usage totals. The plugin reads credentials to request usage but never displays, logs, refreshes, or modifies them. Subscription endpoints are undocumented and may change."
     },
     {
+      "id": "chat-timestamps",
+      "displayName": "Chat Timestamps",
+      "description": "Show sent and received message times in BB's native chat action strip.",
+      "icon": "Clock",
+      "tags": [
+        "timestamps",
+        "messages",
+        "chat",
+        "ui"
+      ],
+      "author": {
+        "name": "Fabio Rehm",
+        "github": "fgrehm",
+        "url": "https://github.com/fgrehm"
+      },
+      "source": {
+        "git": {
+          "url": "https://github.com/fgrehm/bb-plugins.git",
+          "subdir": "plugins/chat-timestamps",
+          "ref": "main"
+        }
+      },
+      "overview": "Chat Timestamps shows how long ago each message was sent or received, in BB's own message action strip. Hover or focus a message on a desktop, or look beside the message actions on a touch screen, for a relative time such as `5m ago`; hover the timestamp for the exact local date, time, and zone offset. It covers your messages, agent replies, and messages delivered from other threads.\n\nIt works by decorating BB's existing timeline rows, so the timestamp inherits the theme's muted text color and does not add another toolbar. Immediately after navigation, and every 30 seconds otherwise, the plugin reads the newest timeline page of the threads on screen through BB's public SDK, then fetches older pages only as older messages come into view. Nothing is written to disk, no thread data is modified, and no network requests are made.\n\n## Requirements and limits\n\nRequires BB 0.47 or newer. Because the timestamp is placed with BB's current timeline markup rather than a public message-action API, a BB markup change can move or hide it until the plugin is updated. Older pages are backfilled for the open thread, so in a split pane the other thread's oldest messages can stay unlabeled. Only conversation messages get a timestamp; tool rows and turn markers do not. Touch screens show timestamps at rest because there is no hover. Times use the browser's locale and local time zone."
+    },
+    {
       "id": "rate-your-chat",
       "displayName": "Rate Your Chat",
       "description": "Local whole-chat feedback with recorded model and reasoning variations for later analysis.",

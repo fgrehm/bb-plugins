@@ -22,6 +22,12 @@ This repository is MIT licensed (see `LICENSE`, which credits Fabio Rehm). Vendo
 - License: MIT - Copyright (c) 2026 Zhen Huang (full license text: `plugins/rpiv-todo/LICENSE`)
 - Used in: `plugins/rpiv-todo/` (forked at 0.1.2; event pages changed from 500 to 100 to match BB 0.47's limit, and reducer/paging tests added)
 
+## pixexid/bb-plugin-chat-timestamps
+
+- Source: https://github.com/pixexid/bb-plugin-chat-timestamps
+- License: MIT - Copyright (c) 2026 Pixexid (full license text: `plugins/chat-timestamps/LICENSE`)
+- Used in: `plugins/chat-timestamps/` (forked at 0.1.0 commit `d244217`; history loading replaced with on-demand backfill, the client request state and touch-screen visibility fixed, the RPC split, dependencies updated, and tests added; the differences are listed in the plugin README)
+
 ## simple-icons/simple-icons
 
 - Source: https://github.com/simple-icons/simple-icons

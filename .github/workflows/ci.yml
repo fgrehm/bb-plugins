@@ -67,6 +67,8 @@ jobs:
             command: pnpm run typecheck && pnpm run lint && pnpm test
           - plugin: rpiv-todo
             command: pnpm run typecheck && pnpm run lint && pnpm test
+          - plugin: chat-timestamps
+            command: pnpm run typecheck && pnpm run lint && pnpm test
     defaults:
       run:
         working-directory: plugins/${{ matrix.plugin }}

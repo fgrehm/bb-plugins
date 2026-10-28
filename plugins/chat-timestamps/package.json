@@ -1,0 +1,45 @@
+{
+  "name": "bb-plugin-chat-timestamps",
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "description": "Show sent and received message times in BB's native chat action strip.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fgrehm/bb-plugins.git",
+    "directory": "plugins/chat-timestamps"
+  },
+  "engines": {
+    "bb": ">=0.47",
+    "bbPluginSdk": ">=0.6.79"
+  },
+  "bb": {
+    "name": "Chat Timestamps",
+    "description": "Show sent and received message times in BB's native chat action strip.",
+    "branding": {
+      "icon": "./assets/icon.svg"
+    },
+    "server": "./server.ts",
+    "app": "./app.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "prettier --check \"*.ts\" \"*.tsx\" \"*.css\" \"src/**/*.ts\" \"README.md\" \"PLUGIN_OVERVIEW.md\" \"CHANGELOG.md\" \"package.json\"",
+    "format": "prettier --write \"*.ts\" \"*.tsx\" \"*.css\" \"src/**/*.ts\" \"README.md\" \"PLUGIN_OVERVIEW.md\" \"CHANGELOG.md\" \"package.json\""
+  },
+  "dependencies": {
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.6.79",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "hono": "^4.13.14",
+    "jsdom": "^30.1.3",
+    "prettier": "^3.9.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.12"
+  }
+}

@@ -15,7 +15,7 @@ bb marketplace add git:github.com/fgrehm/bb-plugins@main
 bb plugin install attention@fgrehm-plugins
 ```
 
-Available ids: `attention`, `favicon`, `pi-extras`, `rate-your-chat`, `review-workspace`, `rpiv-todo`.
+Available ids: `attention`, `chat-timestamps`, `favicon`, `pi-extras`, `rate-your-chat`, `review-workspace`, `rpiv-todo`.
 
 Catalog entries track the `main` branch, so updates are the same on every machine:
 
@@ -66,6 +66,11 @@ on an answer, with running-turn concurrency and input density below. Reads BB's
 thread history through the public SDK and computes on demand; it does not read
 message bodies, tool arguments, or tool output. A turn is execution time, not
 useful work, and BB records no reading or focus.
+
+### [Chat Timestamps](plugins/chat-timestamps) - `chat-timestamps`
+
+Shows a relative timestamp for sent and received messages in BB's own message action strip, with the exact local date and time in the tooltip. The timestamp appears on hover or focus. Reads message times through the public thread timeline API and fetches older pages only as older messages come into view. A local fork of [pixexid/bb-plugin-chat-timestamps](https://github.com/pixexid/bb-plugin-chat-timestamps) that removes the fixed history window and fixes retry handling.
+
 ### [Rate Your Chat](plugins/rate-your-chat) - `rate-your-chat`
 
 Skippable whole-chat feedback offered after archiving. Stores usefulness, use case, notes, and recorded model/reasoning variations in local SQLite, with editing and JSON export. No feedback is sent to providers.
