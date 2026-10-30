@@ -5,6 +5,15 @@ import type { UsageSource } from "./usage";
 import { UsagePage } from "./usage-page/components/usage/usage-page";
 import { ProviderMark } from "./usage-page/components/usage/providers";
 import { PiSettingsPanel } from "./settings-panel";
+import {
+  PiTrustBadge,
+  PiTrustPanel,
+  PiTrustSegmentDetails,
+  PiTrustSegmentSummary,
+  usePiTrustRowData,
+  usePiTrustSegmentVisible,
+  type PiTrustRowData,
+} from "./trust-panel";
 import "./usage-page/app.css";
 
 type Tab = "sessions" | "subscriptions";
@@ -132,6 +141,36 @@ export default definePluginApp((app) => {
     title: "Pi Settings",
     description: "Global Pi defaults, long-thread summarization, shell, and reporting.",
     component: PiSettingsPanel,
+  });
+  // A metadata-line badge on Pi threads whose workspace ships project resources
+  // that Pi skipped for lack of a trust decision. BB hides the whole line unless
+  // the sidebar's metadata experiment and row setting are on.
+  app.slots.experimental_threadRowMetadata<PiTrustRowData>({
+    id: "pi-trust",
+    order: 20,
+    useData: usePiTrustRowData,
+    component: PiTrustBadge,
+  });
+  // The primary surface: a segment in the context row above the composer, where
+  // it is visible on mobile. Expanding it shows the same panel and Trust action.
+  app.slots.experimental_threadContextSegment({
+    id: "pi-trust",
+    title: "Pi project trust",
+    group: "2_pi_trust",
+    order: 10,
+    summary: PiTrustSegmentSummary,
+    details: PiTrustSegmentDetails,
+    useVisible: usePiTrustSegmentVisible,
+  });
+  // The actionable half: a thread tab that reads the same check and offers the
+  // saved decision. It is an action so it never opens on its own.
+  app.slots.experimental_tab({
+    context: { kind: "thread" },
+    availability: "action",
+    id: "pi-trust",
+    title: "Pi project trust",
+    icon: "SecurityCheck",
+    component: ({ threadId }) => <PiTrustPanel threadId={threadId} />,
   });
   app.slots.navPanel({
     id: "pi-extras",

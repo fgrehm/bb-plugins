@@ -3,6 +3,9 @@ node_modules/
 dist/
 coverage/
 
+# Local scratch and test temp directories
+.tmp/
+
 # Local environment files
 .env
 .env.*

@@ -49,6 +49,7 @@ Pi-focused usage extras in a single sidebar panel with two tabs:
 - **Sessions** - estimated token usage and cost computed from local Pi session transcripts, broken down by the backend each session used (Codex, OpenCode Go, Ollama Cloud), with per-provider marks. Backed by a durable parse cache. Adapted from [iamEvanYT/bb-usage-page](https://github.com/iamEvanYT/bb-usage-page), scoped to Pi.
 - **Subscriptions** - live subscription usage for Pi-managed Codex, OpenCode Go, and Ollama Cloud credentials (read from Pi's `auth.json`, never logged or displayed), with a short TTL cache for snappy tab switches.
 - **Thread titles and commit messages** - registers Pi as a BB AI service for both tasks. Select Pi independently for each under Settings → AI services, with separate model choices in the settings panel.
+- **Project trust** - marks Pi threads whose workspace has trust-gated project resources that Pi skipped for lack of a saved decision, with a warning above the message box and a sidebar badge, names the skipped paths to the agent, and saves the per-directory decision `pi /trust` would save only when you press the button.
 
 ### [Favicon](plugins/favicon) - `favicon`
 

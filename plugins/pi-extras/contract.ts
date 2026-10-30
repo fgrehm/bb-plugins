@@ -77,6 +77,26 @@ const titleSettingsSchema = z
   .object({ titleModel: z.string(), commitModel: z.string() })
   .strict();
 
+/**
+ * One workspace's Pi project-trust state. `resources` is bounded by Pi's own
+ * eight gated `.pi` entries plus the `.agents/skills` directories between the
+ * workspace and the filesystem root, so this stays small on the wire.
+ */
+const trustCheckSchema = z.object({
+  path: z.string(),
+  hostId: z.string().nullable(),
+  storePath: z.string(),
+  canonicalPath: z.string(),
+  resources: z.array(z.string()),
+  savedDecision: z.boolean().nullable(),
+  savedDecisionPath: z.string().nullable(),
+  defaultProjectTrust: z.enum(["ask", "always", "never"]),
+  trusted: z.boolean(),
+  status: z.enum(["trusted", "untrusted", "no-resources", "unknown"]),
+  canTrust: z.boolean(),
+  error: z.string().nullable(),
+}).strict();
+
 export const piExtrasHostContract = defineRpcContract({
   readUsage: {
     input: z.object({}).strict(),
@@ -98,6 +118,25 @@ export const piExtrasHostContract = defineRpcContract({
   probeTitleService: {
     input: z.object({}).strict(),
     output: titleServiceStatusSchema,
+  },
+  /** Read-only project-trust report for workspaces on this host. */
+  readTrustChecks: {
+    input: z.object({ paths: z.array(z.string()).max(200), force: z.boolean().optional() }).strict(),
+    output: z.object({ checks: z.record(z.string(), trustCheckSchema) }).strict(),
+  },
+  /**
+   * Saves Pi's trust decision for one workspace, exactly as `pi /trust` does.
+   * `confirm` must be the literal `true`, so no caller writes without an
+   * explicit user action behind it.
+   */
+  saveTrustDecision: {
+    input: z.object({
+      path: z.string(),
+      confirm: z.literal(true),
+      /** The canonical directory the user saw; a changed target rejects the write. */
+      expectedCanonicalPath: z.string(),
+    }).strict(),
+    output: trustCheckSchema,
   },
 });
 
@@ -121,4 +160,28 @@ export const piExtrasRpcContract = defineRpcContract({
   writeTitleSettings: { input: titleSettingsSchema, output: titleSettingsSchema },
   /** The same cached readiness answer the AI services picker receives. */
   titleServiceStatus: { input: z.object({}).strict(), output: titleServiceStatusSchema },
+  /**
+   * Per-thread Pi trust state, keyed by thread id so the sidebar badge and the
+   * thread's trust panel share one read. A thread without a Pi environment path
+   * reports `unknown` rather than failing the batch.
+   */
+  threadTrustChecks: {
+    input: z.object({ keys: z.array(z.string()).max(1000) }).strict(),
+    output: z.record(z.string(), trustCheckSchema),
+  },
+  /** Re-reads one thread's trust state, bypassing server and host caches. */
+  refreshThreadTrust: {
+    input: z.object({ threadId: z.string() }).strict(),
+    output: trustCheckSchema,
+  },
+  /** Saves Pi's trust decision for the thread's workspace; never called on read. */
+  trustThreadWorkspace: {
+    input: z.object({
+      threadId: z.string(),
+      confirm: z.literal(true),
+      /** The workspace the user saw on the button; re-resolved before writing. */
+      workspace: z.object({ hostId: z.string(), canonicalPath: z.string() }).strict(),
+    }).strict(),
+    output: trustCheckSchema,
+  },
 });

@@ -1,0 +1,4 @@
+# pnpm reads dependency-age policy here. This exception pins the SDK that
+# matches the running BB app, which is newer than the default release-age gate.
+minimumReleaseAgeExclude:
+  - '@get-bb/plugin-sdk@0.6.94'

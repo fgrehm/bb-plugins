@@ -4,12 +4,12 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "bb": ">=0.41",
-    "bbPluginSdk": ">=0.4.34"
+    "bb": ">=0.48",
+    "bbPluginSdk": ">=0.6.94"
   },
   "bb": {
     "name": "Pi Extras",
-    "description": "Shows Pi usage, manages global Pi settings and updates, and generates thread titles and commit messages when selected for each task.",
+    "description": "Shows Pi usage, manages Pi settings and updates, flags untrusted Pi workspaces, and generates thread titles and commit messages.",
     "branding": {
       "icon": "ChartNoAxesCombined"
     },
@@ -19,8 +19,8 @@
     "skills": []
   },
   "scripts": {
-    "test": "node --experimental-strip-types --test usage.test.ts pi-settings.test.ts pi-models.test.ts pi-title.test.ts pi-title-runner.test.ts pi-session.test.ts pi-process.test.ts",
-    "test:components": "vitest run update-actions.test.tsx settings-panel.test.tsx title-service-settings.test.tsx",
+    "test": "node --experimental-strip-types --test usage.test.ts pi-settings.test.ts pi-models.test.ts pi-title.test.ts pi-title-runner.test.ts pi-session.test.ts pi-process.test.ts pi-trust.test.ts",
+    "test:components": "vitest run update-actions.test.tsx settings-panel.test.tsx title-service-settings.test.tsx pi-trust-server.test.ts trust-panel.test.tsx",
     "lint": "tsc --noEmit",
     "build": "bb plugin build"
   },
@@ -28,10 +28,11 @@
     "@hugeicons/core-free-icons": "^4.3.2",
     "@hugeicons/react": "^1.1.10",
     "@radix-ui/react-slot": "^1.3.3",
+    "proper-lockfile": "^4.1.2",
     "zod": "^4.6.6"
   },
   "devDependencies": {
-    "@get-bb/plugin-sdk": "0.5.29",
+    "@get-bb/plugin-sdk": "0.6.94",
     "@pierre/diffs": "^1.4.2",
     "@radix-ui/react-alert-dialog": "^1.1.23",
     "@radix-ui/react-context-menu": "^2.3.7",
@@ -46,6 +47,7 @@
     "@testing-library/react": "^16.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.20.2",
+    "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "class-variance-authority": "^0.7.1",

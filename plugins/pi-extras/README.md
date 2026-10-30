@@ -6,6 +6,7 @@ A BB plugin for Pi usage, global Pi settings, and Pi-powered thread titles and c
 - **Subscriptions:** live usage for Pi-managed legacy Codex, OpenCode Go, and Ollama Cloud credentials, with a short-lived cache.
 - **Pi settings:** choose standalone Pi defaults and model scope, adjust runtime settings relevant to BB threads, refresh model catalogs, and update Pi extensions.
 - **AI services:** to activate Pi-powered thread titles or commit messages, select Pi for each task in BB Settings > AI services. These BB-level selections are separate from the per-task model choices in Pi Extras settings; BB's Automatic setting does not select third-party services.
+- **Project trust:** shows a warning segment above the thread's message box (and a sidebar badge) when Pi skipped trust-gated project resources, and saves the per-directory decision Pi's `/trust` would save, only after you press the button.
 
 The Pi Extras plugin adds **Pi Usage** to BB's main sidebar and **Pi** to BB Settings. It is not an agent provider and does not appear in the provider or model pickers. See [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) for attribution.
 
@@ -33,6 +34,14 @@ The Pi Extras plugin adds **Pi Usage** to BB's main sidebar and **Pi** to BB Set
 ### Runtime settings
 
 <img src="docs/runtime-settings.webp" alt="Pi runtime settings" width="640">
+
+### Composer trust warning
+
+<img src="docs/trust-segment.webp" alt="Pi trust warning segment above the message box" width="640">
+
+### Project trust panel
+
+<img src="docs/trust-panel.webp" alt="Expanded Pi project trust panel with the Trust action" width="640">
 
 ### Thread titles and commit messages
 
@@ -92,6 +101,14 @@ Two consequences shape the panel:
 - A non-empty scope overrides `defaultProvider` and `defaultModel` at startup, because Pi starts on the scope's first entry. The panel says so, and keeps the model you picked first in the scope.
 
 The scope editor is driven by the same available-model list. It writes exact `provider/id` references, drops globs you have changed, keeps globs that still cover your selection, keeps patterns that match nothing (Pi warns and skips those, and a model may return), and omits `enabledModels` entirely when every available model is selected, which is how Pi stores "no scope".
+
+### Composer trust warning
+
+<img src="docs/trust-segment.webp" alt="Pi trust warning segment above the message box" width="640">
+
+### Project trust panel
+
+<img src="docs/trust-panel.webp" alt="Expanded Pi project trust panel with the Trust action" width="640">
 
 ### Thread titles and commit messages
 
@@ -156,7 +173,7 @@ Readiness asks Pi for available models with a short timeout, and caches only pos
 | `steeringMode`, `followUpMode` | BB does its own queueing. A steer cancels the running turn via `session/cancel` and the bridge drains its queue one prompt at a time, so Pi's internal queue stays empty and the setting has nothing to decide. See `turn/steer` and the queue drain in `packages/provider-bridge-acp/src/bridge/bridge.ts` | BB switches to Pi's native steering instead of cancel-and-re-prompt |
 | `cacheWarming` | It only runs for a model that declares a `promptCache` lifetime. No built-in model in Pi 1.0.0's catalog declares one, so the setting still cannot fire with the built-in catalog | A built-in model gains a `promptCache` entry after a catalog refresh, visible by re-querying `get_available_models` |
 | `images.blockImages`, `images.autoResize` | Real, and `blockImages` is a genuine footgun: Pi replaces every image in a user message with the text "Image reading is disabled." before it reaches the model. Left out as settings the user does not attach images with. Note `autoResize` only reaches images the agent reads through Pi's own tools, not images attached to a prompt | Screenshots become a routine part of the workflow here |
-| `defaultProjectTrust` | The most consequential key in the file, and deliberately left to Pi. See below | The user asks for a way to manage per-directory trust |
+| `defaultProjectTrust` | The most consequential key in the file, and deliberately left to Pi. A global value silently changes the trust boundary for every repo, so the panel reports the per-directory consequence instead and offers to save one decision | The user asks for a global trust default in BB |
 | `hideThinkingBlock` | BB renders Pi's reasoning behind its own `TimelineReasoning` component, so a Pi-side switch adds little | BB stops rendering reasoning blocks |
 | `thinkingBudgets` | Reaches BB and works, but is per-level token ceilings that Pi already tunes per model. Left out as not worth the surface | Reasoning cost needs tuning per level |
 | `retry.*` | Reaches BB. Left out because Pi's defaults are reasonable and it layers on top of whatever BB does with a failed turn, which was not verified and is a reason for caution | BB documents its own turn-level retry behavior, making the interaction predictable |
@@ -174,7 +191,7 @@ Pi Extras edits the settings file used by the Pi executable on the host. BB laun
 
 `cacheWarming` remains out of scope for the built-in catalog because none of its Pi 1.0.0 models declares a `promptCache` lifetime. `quietStartup` and the TUI settings remain irrelevant to BB threads.
 
-### Project trust, and why it stays in Pi
+### Project trust, surfaced rather than silently skipped
 
 Pi documents the behavior directly: print, JSON, and RPC modes cannot show the built-in trust prompt, and with no command-line override, extension, or saved decision, `defaultProjectTrust: "always"` loads protected project resources while `"ask"` and `"never"` skip them.
 
@@ -182,11 +199,20 @@ In a BB setup every link in that chain is inert, which is why BB never prompts:
 
 - BB passes neither `--approve` nor `--no-approve`.
 - BB's Pi extension handles transport plumbing only; it never handles the `project_trust` event.
-- `~/.pi/agent/trust.json` does not exist, and only Pi's `/trust` in its TUI writes one, which BB never runs.
+- Only Pi's `/trust` in its TUI writes a saved decision, and BB never runs that prompt.
 
-So `ask` means "never" for BB threads and `always` means "every repository, every time", including project `packages` (which install npm packages) and `extensions` (which are executable code). The panel does not expose this, because a global switch that silently changes the trust boundary for every repo is not something to flip from a settings page, and because the per-directory answer, writing trust decisions, was not requested.
+So `ask` means "never" for BB threads and `always` means "every repository, every time", including project `packages` (which install npm packages) and `extensions` (which are executable code). Pi Extras does not expose `defaultProjectTrust` as a setting, because a global switch that silently changes the trust boundary for every repo is not something to flip from a settings page. It reports the per-directory consequence instead:
 
-If that changes, the useful shape is not a select. It is a read-only list of which checkouts ship a `.pi` directory, plus per-directory decisions, which means this plugin writing to Pi's trust store and needs explicit sign-off first.
+- The host entry mirrors Pi's own scan (`packages/coding-agent/src/core/trust-manager.ts`): the eight gated entries under `<workspace>/.pi`, plus `.agents/skills` from the workspace up to the filesystem root, excluding the user-level `~/.agents/skills`. A bare `.pi` directory gates nothing, exactly as in Pi.
+- It resolves the decision the same way Pi does without an extension: canonical directory keys in `~/.pi/agent/trust.json`, closest parent wins, then `defaultProjectTrust` from user settings. Results are cached for a few seconds and keyed by the trust store's mtime. An unreadable store is reported as unknown rather than as untrusted, and it is never replaced: the panel refuses to save until the store can be read.
+- The Trust action carries the machine and canonical path shown on the button. If the thread moves or a symlink retargets before the click lands, the write is rejected instead of trusting a different directory. The panel shows the store path it will write, including when `PI_CODING_AGENT_DIR` overrides it.
+- Refresh bypasses the plugin and host caches, so a decision saved by `pi /trust` elsewhere shows up immediately rather than after the 30-second window.
+- A segment above the thread's message box reads **Pi: N resources skipped**; expanding it shows the gated paths and, when the workspace is not trusted, offers **Trust <path> for Pi**. The same panel is available as the **Pi project trust** action tab, and a sidebar badge marks the thread in the list. That button appends one canonical `true` entry to `~/.pi/agent/trust.json` under Pi's lock file, preserving every other entry including `null` tombstones, and changes nothing else.
+- A Pi thread whose workspace is untrusted also gets a short agent instruction telling it to open its first reply by naming the skipped resources. Agent configuration is synchronous, so the notice uses a check warmed when the thread is created, becomes active, or goes idle; a check that has not finished yet contributes nothing rather than blocking the turn. In a cold, brand-new workspace that can cost the first thread its notice.
+
+Three limits are worth knowing. The composer segment is always available; the sidebar badge additionally needs BB's sidebar metadata experiment and the Organize > Rows > Metadata setting. An installed Pi extension that answers `project_trust` decides before saved decisions do; this panel cannot see that answer, so it can only report what Pi would do without one, and it says so where it matters. And the first-turn notice is best effort: agent configuration is synchronous, so it reads a check warmed when the thread is created, becomes active, or goes idle. In a brand-new workspace, the environment path can appear only after `thread.created`, so the very first thread there can start before the check has an answer and get no notice. The badge and the panel are unaffected, and a later thread in that workspace usually gets the notice, though a long gap can race the observation window again. Closing that gap needs core support, which is tracked as bb#4491.
+
+A saved decision applies to the next Pi session. Clicking the button does not retrofit resources into the running thread; start a new thread, or let the current one finish without them.
 
 ### Read-only and out of scope
 
@@ -205,4 +231,8 @@ pnpm run lint
 bb plugin install . --yes
 ```
 
-Tests use fake file reads and fake HTTP responses. They make no network calls and never read your Pi credentials.
+Tests use fake file reads and fake HTTP responses, and the project-trust fixtures live under the repository's git-ignored `.tmp/`. They make no network calls and never read your Pi credentials.
+
+The trust tests need the sandbox to allow writes to `.pi` directories under `.tmp/`, because Pi's gated layout uses that directory name. Add `"/data/projects/bb-marketplace/.tmp/**/.pi"` to `.pi/sandbox.json` when your global policy denies `**/.pi`.
+
+`pnpm-workspace.yaml` carries one `minimumReleaseAgeExclude` entry for `@get-bb/plugin-sdk@0.6.94`, the SDK that matches the running BB app. Without it, pnpm's dependency-age policy rejects a freshly published SDK. Remove the file once that version is older than the policy cutoff and a plain `pnpm install` passes.

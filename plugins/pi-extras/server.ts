@@ -4,11 +4,24 @@ import { unavailablePiUsage } from "./usage.js";
 import usagePagePlugin from "./usage-page/server.js";
 
 import { isCommitPrompt } from "./pi-title.js";
+import { createTrustSupport } from "./pi-trust-server.js";
 
 const TITLE_STATUS_TTL_MS = 30_000;
 
 export default function plugin(bb: BbPluginApi): void {
   const host = bb.hosts.experimental_client({ contract: piExtrasHostContract });
+  const trust = createTrustSupport(bb, host);
+
+  // The synchronous agent-configuration callback can only read a warm cache, so
+  // a new or waking thread checks its workspace before its first turn resolves.
+  bb.events.on("thread.created", ({ thread }) => trust.warm(thread.id));
+  bb.events.on("thread.active", ({ thread }) => trust.warm(thread.id));
+  bb.events.on("thread.idle", ({ thread }) => trust.warm(thread.id));
+
+  bb.agents.configure((context) => {
+    const instructions = trust.instructionsFor(context);
+    return { tools: [], skills: [], ...(instructions === null ? {} : { instructions }) };
+  });
 
   /**
    * Both text models live in plugin storage rather than `bb.settings.define`,
@@ -164,6 +177,15 @@ export default function plugin(bb: BbPluginApi): void {
         cachedUsage = { fetchedAt: Date.now(), result };
       }
       return result;
+    },
+    async threadTrustChecks({ keys }) {
+      return trust.readChecks(keys);
+    },
+    async refreshThreadTrust({ threadId }) {
+      return trust.refresh(threadId);
+    },
+    async trustThreadWorkspace({ threadId, confirm, workspace }) {
+      return trust.trustWorkspace(threadId, confirm, workspace);
     },
   });
 

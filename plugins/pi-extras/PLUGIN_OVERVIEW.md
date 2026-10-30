@@ -2,6 +2,10 @@ Pi Extras brings Pi usage and settings into BB. Its Sessions view estimates toke
 
 The settings panel edits Pi defaults, model scope, selected runtime settings, model catalogs, and extensions. For Pi to generate BB thread titles or commit messages, select Pi separately for each task under BB Settings > AI services. This does not change the model running the thread.
 
+Pi Extras also surfaces project trust. BB starts Pi in RPC mode, which cannot show Pi's trust prompt, so a workspace with trust-gated resources and no saved decision runs with those resources skipped. A warning segment above the message box, plus a sidebar badge, marks such Pi threads; when the check has finished before a turn starts, the first reply also names what was skipped; and the segment expands to list the gated paths with one explicit **Trust** button that saves the same per-directory decision `pi /trust` saves. Detection only reads Pi's trust store and user settings; the store changes only when you press that button, and the decision applies to the next Pi session.
+
 ## Requirements and privacy
+
+The trust segment sits above the thread's composer. The sidebar badge additionally needs BB's sidebar row-metadata experiment and the Organize > Rows > Metadata setting. The panel cannot see a Pi extension that answers the `project_trust` event, so it reports what Pi does without one.
 
 Pi must be installed on BB's primary machine. Subscription usage requires the relevant credentials in Pi's auth.json. Codex usage requires Pi's `openai-codex` credential and account ID, which Pi offers as the `OpenAI Codex (legacy)` sign-in; Pi's newer `openai` SIWC credential does not provide access to Codex usage totals. The plugin reads credentials to request usage but never displays, logs, refreshes, or modifies them. Subscription endpoints are undocumented and may change.
