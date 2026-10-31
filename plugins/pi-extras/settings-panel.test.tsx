@@ -40,7 +40,7 @@ describe("PiSettingsPanel", () => {
     setup(BASE);
     const select = await screen.findByRole("combobox", { name: /default model/i });
     fireEvent.change(select, { target: { value: "opencode-go/kimi-k2.6" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(rpc.call).toHaveBeenCalledWith("writeSettings", expect.objectContaining({
       defaultProvider: "opencode-go",
       defaultModel: "kimi-k2.6",
@@ -53,7 +53,7 @@ describe("PiSettingsPanel", () => {
     const select = await screen.findByRole("combobox", { name: /default model/i });
     expect(select).toHaveProperty("value", "openai-codex/gpt-5.5");
     fireEvent.change(select, { target: { value: "opencode-go/kimi-k2.6" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(rpc.call).toHaveBeenCalledWith("writeSettings", expect.objectContaining({
       enabledModels: ["opencode-go/kimi-k2.6", "openai-codex/gpt-5.6-luna"],
     })));
@@ -70,7 +70,7 @@ describe("PiSettingsPanel", () => {
     fireEvent.change(screen.getByRole("combobox", { name: /default thinking level/i }), {
       target: { value: "high" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(rpc.call).toHaveBeenCalledWith("writeSettings", expect.objectContaining({
       defaultProvider: "openai",
       defaultModel: "gpt-4",
@@ -78,22 +78,22 @@ describe("PiSettingsPanel", () => {
     })));
   });
 
-  it("keeps advanced sections collapsed until opened", async () => {
+  it("shows one settings section per tab and keeps the others out of the document", async () => {
     setup(BASE);
     await screen.findByRole("combobox", { name: /default model/i });
-    expect(screen.getByText("Model scope").closest("details")).toHaveProperty("open", false);
-    expect(screen.getByText("Runtime settings").closest("details")).toHaveProperty("open", false);
-    expect(screen.getByText("Thread titles and commit messages").closest("details")).toHaveProperty("open", false);
-    expect(screen.getByText("Maintenance").closest("details")).toBeNull();
-    expect(screen.getByRole("combobox", { name: /default model/i })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^(Models|Runtime|Titles & commits|Maintenance)$/ }).length).toBe(4);
+    expect(screen.queryByRole("combobox", { name: /summarize long threads/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Update extensions" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
+    expect(screen.queryByRole("combobox", { name: /default model/i })).toBeNull();
+    expect(screen.getByRole("combobox", { name: /summarize long threads/i })).toBeTruthy();
   });
 
   it("writes no scope when every model is selected", async () => {
     setup({ ...BASE, enabledModels: [] });
     await screen.findByRole("combobox", { name: /default model/i });
-    fireEvent.click(screen.getByText("Model scope"));
     fireEvent.click(screen.getByRole("button", { name: "Select all" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(rpc.call).toHaveBeenCalledWith("writeSettings", expect.objectContaining({
       enabledModels: [],
     })));
@@ -108,7 +108,6 @@ describe("PiSettingsPanel", () => {
   it("surfaces unsafe and unresolved patterns without deleting them", async () => {
     setup({ ...BASE, enabledModels: ["!opencode-go/*", "openai-codex/gpt-4"] });
     await screen.findByRole("combobox", { name: /default model/i });
-    fireEvent.click(screen.getByText("Model scope"));
     expect(screen.getByRole("button", { name: "Remove pattern !opencode-go/*" })).not.toBeNull();
     expect(screen.getByText(/is not an exclusion syntax/i)).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Remove pattern openai-codex\/gpt-4/ }));
@@ -119,7 +118,7 @@ describe("PiSettingsPanel", () => {
   it("writes the runtime settings that reach a BB thread", async () => {
     setup(BASE);
     await screen.findByRole("combobox", { name: /default model/i });
-    fireEvent.click(screen.getByText("Runtime settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
 
     fireEvent.change(screen.getByRole("combobox", { name: /summarize long threads/i }), {
       target: { value: "off" },
@@ -136,7 +135,7 @@ describe("PiSettingsPanel", () => {
     fireEvent.change(screen.getByRole("combobox", { name: /analytics sharing/i }), {
       target: { value: "on" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(rpc.call).toHaveBeenCalledWith("writeSettings", expect.objectContaining({
       compaction: { enabled: false, reserveTokens: 48000, keepRecentTokens: null },
@@ -151,7 +150,7 @@ describe("PiSettingsPanel", () => {
       compaction: { enabled: null, reserveTokens: 20000, keepRecentTokens: null },
     }));
     await screen.findByRole("combobox", { name: /default model/i });
-    fireEvent.click(screen.getByText("Runtime settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
     expect((screen.getByRole("combobox", { name: /summarize long threads/i }) as HTMLSelectElement).value).toBe("pi");
     expect((screen.getByRole("spinbutton", { name: /context kept free/i }) as HTMLInputElement).value).toBe("20000");
     expect((screen.getByRole("spinbutton", { name: /recent conversation kept/i }) as HTMLInputElement).placeholder).toBe("Pi uses 20000");
@@ -159,7 +158,7 @@ describe("PiSettingsPanel", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /prefix for every command/i }), {
       target: { value: "nice" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(rpc.call).toHaveBeenCalledWith("writeSettings", expect.objectContaining({
       compaction: { enabled: null, reserveTokens: 20000, keepRecentTokens: null },
       httpIdleTimeoutMs: null,

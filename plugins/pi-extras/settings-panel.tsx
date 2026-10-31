@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import type { piExtrasRpcContract } from "./contract";
 import type { PiSettings } from "./pi-settings";
@@ -19,6 +19,15 @@ import { TextServiceSettings } from "./title-service-settings";
 const FIELD_CLASS = "w-full rounded-md border border-input bg-background px-2 py-1";
 /** Sentinel for a saved model that Pi's available list does not contain. */
 const UNAVAILABLE = "(not available)";
+
+type Tab = "models" | "runtime" | "titles" | "maintenance";
+
+const TABS: Array<{ id: Tab; label: string }> = [
+  { id: "models", label: "Models" },
+  { id: "runtime", label: "Runtime" },
+  { id: "titles", label: "Titles & commits" },
+  { id: "maintenance", label: "Maintenance" },
+];
 
 function formatTokens(count: number | null): string {
   if (count === null) return "";
@@ -59,120 +68,76 @@ function placeholderModel(reference: string): PiModelSummary {
   };
 }
 
-export function PiSettingsPanel() {
-  const rpc = useRpc<typeof piExtrasRpcContract>();
-  const [settings, setSettings] = useState<PiSettings | null>(null);
-  const [draft, setDraft] = useState<PiSettings | null>(null);
-  const [models, setModels] = useState<PiModelSummary[]>([]);
-  const [modelsError, setModelsError] = useState<string | null>(null);
-  const [modelsLoading, setModelsLoading] = useState(true);
+function SettingsTabs({ active, onSelect }: { active: Tab; onSelect: (tab: Tab) => void }) {
+  return <nav aria-label="Pi settings sections" className="flex gap-1 border-b border-border">
+    {TABS.map((entry) => (
+      <button
+        key={entry.id}
+        type="button"
+        onClick={() => onSelect(entry.id)}
+        aria-current={active === entry.id ? "page" : undefined}
+        className={`rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors ${active === entry.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+      >
+        {entry.label}
+      </button>
+    ))}
+  </nav>;
+}
+
+function ModelsTab({
+  draft,
+  setDraft,
+  setScope,
+  models,
+  modelsError,
+  modelsLoading,
+  onRefreshModels,
+  coveredRefs,
+  visibleProviders,
+  defaultRef,
+  defaultAvailable,
+  scope,
+  writtenScope,
+  unresolved,
+  negated,
+  coversEverything,
+}: {
+  draft: PiSettings;
+  setDraft: (next: PiSettings) => void;
+  setScope: (patterns: string[]) => void;
+  models: PiModelSummary[];
+  modelsError: string | null;
+  modelsLoading: boolean;
+  onRefreshModels: () => void;
+  coveredRefs: Set<string>;
+  visibleProviders: Array<[string, PiModelSummary[]]>;
+  defaultRef: string | null;
+  defaultAvailable: boolean;
+  scope: string[];
+  writtenScope: string[] | null;
+  unresolved: string[];
+  negated: string[];
+  coversEverything: boolean;
+}): ReactNode {
   const [modelFilter, setModelFilter] = useState("");
+  const [modelListFilter, setModelListFilter] = useState("");
   const [advanced, setAdvanced] = useState(false);
-  const [message, setMessage] = useState("");
-  const [updateOutput, setUpdateOutput] = useState("");
-  const [updating, setUpdating] = useState<"models" | "plugins" | "pinned" | null>(null);
 
-  const loadModels = useCallback(
-    async (force: boolean) => {
-      setModelsLoading(true);
-      try {
-        const result = await rpc.call("listModels", { force });
-        setModels(result.models);
-        setModelsError(result.error);
-      } catch (error) {
-        setModels([]);
-        setModelsError(error instanceof Error ? error.message : String(error));
-      } finally {
-        setModelsLoading(false);
-      }
-    },
-    [rpc],
-  );
-
-  useEffect(() => {
-    void rpc.call("readSettings", {}).then((value) => {
-      setSettings(value);
-      setDraft(value);
-    }).catch((error) => setMessage(String(error)));
-    void loadModels(false);
-  }, [rpc, loadModels]);
-
-  const dirty =
-    settings !== null && draft !== null && JSON.stringify(settings) !== JSON.stringify(draft);
-
-  // BB unmounts the settings section when it leaves the settings route, so a
-  // fresh mount already re-reads Pi. Re-read on focus as well, but never while
-  // the user has unsaved edits.
-  useEffect(() => {
-    if (dirty) return;
-    const reload = () => {
-      if (document.visibilityState !== "visible") return;
-      void rpc.call("readSettings", {}).then((value) => {
-        setSettings(value);
-        setDraft(value);
-      }).catch(() => undefined);
-    };
-    window.addEventListener("focus", reload);
-    document.addEventListener("visibilitychange", reload);
-    return () => {
-      window.removeEventListener("focus", reload);
-      document.removeEventListener("visibilitychange", reload);
-    };
-  }, [dirty, rpc]);
-
-  const defaultRef = useMemo(() => {
-    if (draft === null || draft.defaultProvider === null || draft.defaultModel === null) return null;
-    return `${draft.defaultProvider}/${draft.defaultModel}`;
-  }, [draft]);
-
-  const defaultAvailable = useMemo(
-    () =>
-      defaultRef !== null &&
-      models.some((model) => modelReference(model).toLowerCase() === defaultRef.toLowerCase()),
-    [defaultRef, models],
-  );
-
-  const scope = draft?.enabledModels ?? [];
-  const coveredRefs = useMemo(
-    () => new Set(scope.flatMap((pattern) => matchesModelPattern(pattern, models).map(modelReference))),
-    [scope, models],
-  );
-  const unresolved = useMemo(() => unresolvedPatterns(scope, models), [scope, models]);
-  const negated = useMemo(() => scope.filter(isNegatedPattern), [scope]);
   const scopeIsEmpty = scope.length === 0;
-  const visibleModels = useMemo(
-    () => models.filter((model) => matchesFilter(model, modelFilter)),
-    [models, modelFilter],
+  const filter = modelListFilter.trim();
+  const scopedProviders = useMemo(
+    () => visibleProviders.filter(([, providerModels]) =>
+      providerModels.some((model) => matchesFilter(model, filter)),
+    ),
+    [visibleProviders, filter],
   );
-  const visibleProviders = useMemo(() => groupByProvider(visibleModels), [visibleModels]);
-  // Keep the current selection in the list even when a filter hides it, so the
-  // select does not fall back to another entry.
-  const selectableModels = useMemo(
-    () =>
-      defaultRef === null || defaultAvailable || visibleModels.some((model) => modelReference(model) === defaultRef)
-        ? visibleModels
-        : [...visibleModels, placeholderModel(defaultRef)],
-    [visibleModels, defaultRef, defaultAvailable],
-  );
-  const selectableProviders = useMemo(() => groupByProvider(selectableModels), [selectableModels]);
-  const writtenScope = useMemo(() => scopeForSettings(scope, models), [scope, models]);
-  const coversEverything =
-    models.length > 0 &&
-    writtenScope === null &&
-    (scopeIsEmpty || coveredRefs.size === models.length);
-
-  if (!draft) return <p className="text-sm text-muted-foreground">Loading Pi settings... {message}</p>;
-
-  const setScope = (patterns: string[]) => setDraft({ ...draft, enabledModels: patterns });
-
-  const applyChecked = (checked: Set<string>) =>
-    setScope(buildScopePatterns(checked, scope, models, defaultRef));
+  const noFilterMatches = models.length > 0 && scopedProviders.length === 0;
 
   const toggleModel = (reference: string, next: boolean) => {
     const checked = new Set(coveredRefs);
     if (next) checked.add(reference);
     else checked.delete(reference);
-    applyChecked(checked);
+    setScope(buildScopePatterns(checked, scope, models, defaultRef));
   };
 
   const toggleModels = (references: string[], next: boolean) => {
@@ -181,7 +146,7 @@ export function PiSettingsPanel() {
       if (next) checked.add(reference);
       else checked.delete(reference);
     }
-    applyChecked(checked);
+    setScope(buildScopePatterns(checked, scope, models, defaultRef));
   };
 
   const selectDefaultModel = (reference: string) => {
@@ -204,85 +169,42 @@ export function PiSettingsPanel() {
     });
   };
 
-  const save = async () => {
-    setMessage("Saving...");
-    try {
-      // An empty scope means "every available model", which pi stores by
-      // omitting the key entirely.
-      const next = { ...draft, enabledModels: writtenScope ?? [] };
-      const saved = await rpc.call("writeSettings", next);
-      setSettings(saved);
-      setDraft(saved);
-      setMessage("Saved");
-    } catch (error) {
-      setMessage(String(error));
-    }
-  };
+  // Keep a saved model that no longer exists in the list so the select keeps
+  // its value.
+  const selectableProviders = useMemo(() => groupByProvider(
+    defaultRef !== null && !defaultAvailable ? [...models, placeholderModel(defaultRef)] : models,
+  ), [models, defaultRef, defaultAvailable]);
 
-  const update = async (target: "models" | "plugins" | "pinned") => {
-    setUpdating(target);
-    setMessage("");
-    setUpdateOutput("");
-    try {
-      const result = await rpc.call("update", { target });
-      const labels = target === "models"
-        ? ["Model catalogs refreshed", "Model refresh failed"]
-        : target === "plugins"
-          ? ["Pi extensions updated", "Pi extension update failed"]
-          : ["Pinned packages updated", "Pinned package update failed"];
-      setMessage(labels[result.ok ? 0 : 1]!);
-      setUpdateOutput(result.output || "No output.");
-      // A refreshed catalog changes which models exist.
-      if (target === "models") await loadModels(true);
-    } catch (error) {
-      setMessage(String(error));
-    } finally {
-      setUpdating(null);
-    }
-  };
+  return <div className="space-y-5 pt-4">
+    {modelsError !== null ? (
+      <p role="status" className="rounded-md border border-destructive/30 p-2 text-xs text-destructive">
+        {modelsError} Model values stay editable.
+      </p>
+    ) : null}
 
-  return <div className="space-y-6 text-sm">
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-medium">Model defaults</h3>
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <label className="font-medium" htmlFor="pi-default-model">Default model</label>
         <button
           type="button"
-          onClick={() => void loadModels(true)}
+          onClick={onRefreshModels}
           disabled={modelsLoading}
-          className="rounded-md border border-input px-2 py-1 text-xs disabled:opacity-50"
+          className="text-xs underline underline-offset-2 disabled:opacity-50"
         >
-          {modelsLoading ? "Loading models..." : `Refresh list (${models.length})`}
+          {modelsLoading ? "Loading..." : `Refresh (${models.length})`}
         </button>
       </div>
-
-      {modelsError !== null ? (
-        <p role="status" className="rounded-md border border-destructive/30 p-2 text-xs text-destructive">
-          {modelsError} Model values stay editable below.
-        </p>
-      ) : null}
-
-      {defaultRef !== null && !defaultAvailable ? (
-        <p className="rounded-md border border-border bg-muted p-2 text-xs text-muted-foreground">
-          <code>{defaultRef}</code> is not in Pi&apos;s available list. It may have been retired, the
-          catalog may be stale, or its provider may not be signed in. Pi starts on another model
-          instead. The value is kept as saved.
-        </p>
-      ) : null}
-
-      <div>
-        <label className="mb-1 block font-medium" htmlFor="pi-default-model">
-          Default model
-        </label>
+      <div className="flex items-center gap-2">
         <input
-          className={`${FIELD_CLASS} mb-1`}
-          placeholder="Filter models"
+          className="w-36 shrink-0 rounded-md border border-input bg-background px-2 py-1"
+          placeholder="Filter"
           value={modelFilter}
           onChange={(event) => setModelFilter(event.target.value)}
           aria-label="Filter models"
         />
         <select
           id="pi-default-model"
-          className={FIELD_CLASS}
+          className={`min-w-0 ${FIELD_CLASS}`}
           value={defaultRef === null ? "" : defaultAvailable ? defaultRef : UNAVAILABLE}
           onChange={(event) => selectDefaultModel(event.target.value)}
         >
@@ -290,13 +212,12 @@ export function PiSettingsPanel() {
           {defaultRef !== null && !defaultAvailable ? (
             <option value={UNAVAILABLE}>{defaultRef} (not in Pi&apos;s list)</option>
           ) : null}
-          {selectableProviders.map(([provider, providerModels]) => (
+          {selectableProviders.filter(([, providerModels]) => providerModels.some((model) => matchesFilter(model, modelFilter))).map(([provider, providerModels]) => (
             <optgroup key={provider} label={provider}>
-              {providerModels.map((model) => {
+              {providerModels.filter((model) => matchesFilter(model, modelFilter)).map((model) => {
                 const reference = modelReference(model);
                 return <option key={reference} value={reference}>
                   {model.id}
-                  {coveredRefs.has(reference) ? " (in scope)" : ""}
                   {model.reasoning ? " thinking" : ""}
                   {model.images ? " images" : ""}
                 </option>;
@@ -305,86 +226,76 @@ export function PiSettingsPanel() {
           ))}
         </select>
       </div>
+      {defaultRef !== null && !defaultAvailable ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          <code>{defaultRef}</code> is not in Pi&apos;s available list (retired, stale catalog, or
+          provider signed out). It stays saved, but Pi starts on another model.
+        </p>
+      ) : null}
+      <p className="mt-1 text-xs text-muted-foreground">
+        {scopeIsEmpty
+          ? "A model scope decides what Pi offers; with no scope, every available model is offered and this default applies."
+          : `A model scope is set, so Pi starts on its first entry${defaultRef !== null ? ` and keeps ${defaultRef} first in it` : ""}; this default applies only when the scope is empty.`}
+      </p>
+    </div>
 
-      {scopeIsEmpty ? (
+    <div>
+      <label className="mb-1 block font-medium" htmlFor="pi-thinking-level">Default thinking level</label>
+      <select
+        id="pi-thinking-level"
+        className={FIELD_CLASS}
+        value={draft.defaultThinkingLevel ?? ""}
+        onChange={(event) => setDraft({ ...draft, defaultThinkingLevel: (event.target.value || null) as PiSettings["defaultThinkingLevel"] })}
+      >
+        <option value="">Pi default</option>
+        {THINKING_LEVELS.map((level) => <option key={level}>{level}</option>)}
+      </select>
+    </div>
+
+    <div className="space-y-2">
+      <button
+        type="button"
+        className="text-xs underline underline-offset-2"
+        onClick={() => setAdvanced((value) => !value)}
+        aria-expanded={advanced}
+      >
+        {advanced ? "Hide raw provider and model" : "Edit provider and model as raw values"}
+      </button>
+      {advanced ? (
+        <div className="space-y-3">
+          <label className="block">
+            <span className="mb-1 block font-medium">Default provider</span>
+            <input
+              className={FIELD_CLASS}
+              value={draft.defaultProvider ?? ""}
+              onChange={(event) => setDraft({ ...draft, defaultProvider: event.target.value || null })}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block font-medium">Default model id</span>
+            <input
+              className={FIELD_CLASS}
+              value={draft.defaultModel ?? ""}
+              onChange={(event) => setDraft({ ...draft, defaultModel: event.target.value || null })}
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Pi stores the provider and the model id separately. Choosing a model from the list above
+            writes both together.
+          </p>
+        </div>
+      ) : null}
+    </div>
+
+    <section className="space-y-2 border-t border-border pt-4">
+      <h3 className="font-medium">Model scope</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          No model scope is set, so Pi uses every available model and this default applies at startup.
+          {coversEverything
+            ? "Every available model is in scope, so no scope is written to settings."
+            : `${coveredRefs.size} of ${models.length} models in scope.`}
         </p>
-      ) : (
-        <p className="rounded-md border border-border bg-muted p-2 text-xs text-muted-foreground">
-          A model scope is set, so Pi starts on its first entry and ignores the default model
-          {defaultRef !== null ? (
-            <>
-              {" "}(<code>{defaultRef}</code> is kept first in the scope)
-            </>
-          ) : null}
-          .
-        </p>
-      )}
-
-      <div>
-        <label className="mb-1 block font-medium" htmlFor="pi-thinking-level">
-          Default thinking level
-        </label>
-        <select
-          id="pi-thinking-level"
-          className={FIELD_CLASS}
-          value={draft.defaultThinkingLevel ?? ""}
-          onChange={(event) => setDraft({ ...draft, defaultThinkingLevel: (event.target.value || null) as PiSettings["defaultThinkingLevel"] })}
-        >
-          <option value="">Pi default</option>
-          {THINKING_LEVELS.map((level) => <option key={level}>{level}</option>)}
-        </select>
-      </div>
-
-      <div className="space-y-2">
-        <button
-          type="button"
-          className="text-xs underline underline-offset-2"
-          onClick={() => setAdvanced((value) => !value)}
-          aria-expanded={advanced}
-        >
-          {advanced ? "Hide raw provider and model" : "Edit provider and model as raw values"}
-        </button>
-        {advanced ? (
-          <div className="space-y-3">
-            <label className="block">
-              <span className="mb-1 block font-medium">Default provider</span>
-              <input
-                className={FIELD_CLASS}
-                value={draft.defaultProvider ?? ""}
-                onChange={(event) => setDraft({ ...draft, defaultProvider: event.target.value || null })}
-              />
-            </label>
-            <label className="block">
-              <span className="mb-1 block font-medium">Default model id</span>
-              <input
-                className={FIELD_CLASS}
-                value={draft.defaultModel ?? ""}
-                onChange={(event) => setDraft({ ...draft, defaultModel: event.target.value || null })}
-              />
-            </label>
-            <p className="text-xs text-muted-foreground">
-              Pi stores the provider and the model id separately. Choosing a model from the list
-              above writes both together.
-            </p>
-          </div>
-        ) : null}
-      </div>
-    </section>
-
-    <section className="space-y-3">
-      <h3 className="font-medium">Maintenance</h3>
-      <UpdateActions updating={updating} onUpdate={(target) => void update(target)} />
-      {updateOutput ? <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted p-3 text-xs whitespace-pre-wrap">{updateOutput}</pre> : null}
-    </section>
-
-    <h3 className="font-medium text-muted-foreground">Advanced</h3>
-
-    <details className="rounded-md border border-border p-3">
-      <summary className="cursor-pointer font-medium">Model scope</summary>
-      <section className="mt-4 space-y-3">
-        <div className="flex justify-end gap-2">
+        <div className="flex gap-2">
           <button
             type="button"
             className="rounded-md border border-input px-2 py-1 text-xs disabled:opacity-50"
@@ -402,23 +313,26 @@ export function PiSettingsPanel() {
             Clear
           </button>
         </div>
+      </div>
       <p className="text-xs text-muted-foreground">
         Pi has no model exclusion setting. The scope is an allowlist: it decides which models Pi
-        offers and which one it starts on. Leave it empty, or select everything, for every available
-        model.
-      </p>
-      <p className="text-xs text-muted-foreground">
-        {coversEverything
-          ? "Every available model is in scope, so no scope is written to settings."
-          : `${coveredRefs.size} of ${models.length} models in scope.`}
+        offers and which one it starts on.
       </p>
 
-      {visibleProviders.length === 0 && !modelsLoading ? (
+      <input
+        className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+        placeholder="Filter scope list"
+        value={modelListFilter}
+        onChange={(event) => setModelListFilter(event.target.value)}
+        aria-label="Filter scope list"
+      />
+
+      {noFilterMatches ? (
         <p className="text-xs text-muted-foreground">No models match the filter.</p>
       ) : null}
 
       <div className="max-h-72 space-y-3 overflow-y-auto rounded-md border border-border p-2">
-        {visibleProviders.map(([provider, providerModels]) => {
+        {scopedProviders.map(([provider, providerModels]) => {
           const providerRefs = providerModels.map(modelReference);
           const selectedCount = providerRefs.filter((reference) => coveredRefs.has(reference)).length;
           return <fieldset key={provider} className="space-y-1">
@@ -433,7 +347,7 @@ export function PiSettingsPanel() {
               <span className="text-muted-foreground">{selectedCount}/{providerModels.length}</span>
             </legend>
             <div className="ml-5 space-y-1">
-              {providerModels.map((model) => {
+              {providerModels.filter((model) => matchesFilter(model, filter)).map((model) => {
                 const reference = modelReference(model);
                 const isDefault =
                   defaultRef !== null && reference.toLowerCase() === defaultRef.toLowerCase();
@@ -502,33 +416,197 @@ export function PiSettingsPanel() {
             : writtenScope.join("\n")}
         </pre>
       </details>
-      </section>
-    </details>
+    </section>
+  </div>;
+}
 
-    <details className="rounded-md border border-border p-3">
-      <summary className="cursor-pointer font-medium">Runtime settings</summary>
-      <section className="mt-4 space-y-4">
-        <BehaviorSettings draft={draft} onChange={setDraft} />
-      </section>
-    </details>
+export function PiSettingsPanel() {
+  const rpc = useRpc<typeof piExtrasRpcContract>();
+  const [tab, setTab] = useState<Tab>("models");
+  const [settings, setSettings] = useState<PiSettings | null>(null);
+  const [draft, setDraft] = useState<PiSettings | null>(null);
+  const [models, setModels] = useState<PiModelSummary[]>([]);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const [modelsLoading, setModelsLoading] = useState(true);
+  const [message, setMessage] = useState("");
+  const [updateOutput, setUpdateOutput] = useState("");
+  const [updating, setUpdating] = useState<"models" | "plugins" | "pinned" | null>(null);
 
-    <details className="rounded-md border border-border p-3">
-      <summary className="cursor-pointer font-medium">Thread titles and commit messages</summary>
-      <section className="mt-4 space-y-4">
-        <TextServiceSettings models={models} />
-      </section>
-    </details>
+  const loadModels = useCallback(
+    async (force: boolean) => {
+      setModelsLoading(true);
+      try {
+        const result = await rpc.call("listModels", { force });
+        setModels(result.models);
+        setModelsError(result.error);
+      } catch (error) {
+        setModels([]);
+        setModelsError(error instanceof Error ? error.message : String(error));
+      } finally {
+        setModelsLoading(false);
+      }
+    },
+    [rpc],
+  );
 
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        disabled={!dirty}
-        className="rounded-md border border-input px-3 py-1.5 disabled:opacity-50"
-        onClick={() => void save()}
-      >
-        Save settings
-      </button>
-      {message ? <p className="text-xs text-muted-foreground">{message}</p> : null}
+  useEffect(() => {
+    void rpc.call("readSettings", {}).then((value) => {
+      setSettings(value);
+      setDraft(value);
+    }).catch((error) => setMessage(String(error)));
+    void loadModels(false);
+  }, [rpc, loadModels]);
+
+  const dirty =
+    settings !== null && draft !== null && JSON.stringify(settings) !== JSON.stringify(draft);
+
+  // BB unmounts the settings section when it leaves the settings route, so a
+  // fresh mount already re-reads Pi. Re-read on focus as well, but never while
+  // the user has unsaved edits.
+  useEffect(() => {
+    if (dirty) return;
+    const reload = () => {
+      if (document.visibilityState !== "visible") return;
+      void rpc.call("readSettings", {}).then((value) => {
+        setSettings(value);
+        setDraft(value);
+      }).catch(() => undefined);
+    };
+    window.addEventListener("focus", reload);
+    document.addEventListener("visibilitychange", reload);
+    return () => {
+      window.removeEventListener("focus", reload);
+      document.removeEventListener("visibilitychange", reload);
+    };
+  }, [dirty, rpc]);
+
+  // A model scope decides which models Pi offers and which one it starts on.
+  const defaultRef = useMemo(() => {
+    if (draft === null || draft.defaultProvider === null || draft.defaultModel === null) return null;
+    return `${draft.defaultProvider}/${draft.defaultModel}`;
+  }, [draft]);
+
+  const defaultAvailable = useMemo(
+    () =>
+      defaultRef !== null &&
+      models.some((model) => modelReference(model).toLowerCase() === defaultRef.toLowerCase()),
+    [defaultRef, models],
+  );
+
+  const scope = draft?.enabledModels ?? [];
+  const coveredRefs = useMemo(
+    () => new Set(scope.flatMap((pattern) => matchesModelPattern(pattern, models).map(modelReference))),
+    [scope, models],
+  );
+  const unresolved = useMemo(() => unresolvedPatterns(scope, models), [scope, models]);
+  const negated = useMemo(() => scope.filter(isNegatedPattern), [scope]);
+  const scopeIsEmpty = scope.length === 0;
+  const visibleProviders = useMemo(() => groupByProvider(models), [models]);
+  const writtenScope = useMemo(() => scopeForSettings(scope, models), [scope, models]);
+  const coversEverything =
+    models.length > 0 &&
+    writtenScope === null &&
+    (scopeIsEmpty || coveredRefs.size === models.length);
+
+  if (!draft) return <p className="text-sm text-muted-foreground">Loading Pi settings...</p>;
+
+  const setScope = (patterns: string[]) => setDraft({ ...draft, enabledModels: patterns });
+
+  const save = async () => {
+    setMessage("Saving...");
+    try {
+      // An empty scope means "every available model", which pi stores by
+      // omitting the key entirely.
+      const next = { ...draft, enabledModels: writtenScope ?? [] };
+      const saved = await rpc.call("writeSettings", next);
+      setSettings(saved);
+      setDraft(saved);
+      setMessage("Saved");
+    } catch (error) {
+      setMessage(String(error));
+    }
+  };
+
+  const update = async (target: "models" | "plugins" | "pinned") => {
+    setUpdating(target);
+    setMessage("");
+    setUpdateOutput("");
+    try {
+      const result = await rpc.call("update", { target });
+      const labels = target === "models"
+        ? ["Models refreshed", "Model refresh failed"]
+        : target === "plugins"
+          ? ["Extensions updated", "Extension update failed"]
+          : ["Pinned packages updated", "Pinned package update failed"];
+      setMessage(labels[result.ok ? 0 : 1]!);
+      setUpdateOutput(result.output || "No output.");
+      // A refreshed catalog changes which models exist.
+      if (target === "models") await loadModels(true);
+    } catch (error) {
+      setMessage(String(error));
+    } finally {
+      setUpdating(null);
+    }
+  };
+
+  return <div className="flex flex-col">
+    <SettingsTabs active={tab} onSelect={setTab} />
+    <div className="min-w-0 flex-1 px-0 py-0">
+      {tab === "models" ? (
+        <ModelsTab
+          draft={draft}
+          setDraft={setDraft}
+          setScope={setScope}
+          models={models}
+          modelsError={modelsError}
+          modelsLoading={modelsLoading}
+          onRefreshModels={() => void loadModels(true)}
+          coveredRefs={coveredRefs}
+          visibleProviders={visibleProviders}
+          defaultRef={defaultRef}
+          defaultAvailable={defaultAvailable}
+          scope={scope}
+          writtenScope={writtenScope}
+          unresolved={unresolved}
+          negated={negated}
+          coversEverything={coversEverything}
+        />
+      ) : null}
+      {tab === "runtime" ? (
+        <div className="space-y-4 pt-4">
+          <BehaviorSettings draft={draft} onChange={setDraft} />
+        </div>
+      ) : null}
+      {tab === "titles" ? (
+        <div className="pt-4">
+          <TextServiceSettings models={models} />
+        </div>
+      ) : null}
+      {tab === "maintenance" ? (
+        <div className="space-y-3 pt-4">
+          <p className="text-xs text-muted-foreground">
+            These run against your global install right away; a refresh here does not change saved values.
+          </p>
+          <UpdateActions updating={updating} onUpdate={(target) => void update(target)} />
+          {updateOutput ? <pre className="max-h-64 overflow-auto rounded-md border border-border bg-muted p-3 text-xs whitespace-pre-wrap">{updateOutput}</pre> : null}
+        </div>
+      ) : null}
     </div>
+
+    {tab !== "titles" && tab !== "maintenance" ? (
+      <div className="sticky bottom-0 mt-4 flex items-center gap-3 border-t border-border bg-background py-3">
+        <button
+          type="button"
+          disabled={!dirty}
+          className="rounded-md border border-input px-3 py-1.5 disabled:opacity-50"
+          onClick={() => void save()}
+        >
+          Save
+        </button>
+        <p className="text-xs text-muted-foreground">
+          {dirty ? "Unsaved changes to Pi settings." : message}
+        </p>
+      </div>
+    ) : null}
   </div>;
 }

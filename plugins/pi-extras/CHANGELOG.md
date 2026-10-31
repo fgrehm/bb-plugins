@@ -2,6 +2,10 @@
 
 ## 2026-10-30
 
+### Changed
+
+- Split the Pi settings section into Models, Runtime, Titles & commits, and Maintenance tabs with a shared save bar, replacing the nested collapse cards and moving the model scope next to the model defaults it interacts with, and trim the surrounding copy.
+
 ### Added
 
 - Warn when a Pi thread's workspace has trust-gated resources but no saved Pi project-trust decision: a warning segment above the message box, a sidebar row badge, a first-turn agent notice naming the skipped paths, and a thread panel with an explicit **Trust <workspace> for Pi** action that writes Pi's per-directory decision exactly as `pi /trust` does.
