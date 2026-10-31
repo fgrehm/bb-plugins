@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-10-31
+
+### Changed
+
+- Tune the archive-rating modal for small screens: tighter padding and spacing, smaller type for the title, description, legends, chips, score cards, and footer, and full-height touch targets for score cards, chips, and the Save and Skip buttons (reverting to desktop sizes above the `sm` breakpoint).
+
 ## 2026-10-27
 
 - Let an agent draft a retro for its own chat or a direct subthread through the `file_retro` tool, with confirmation or discarding in the sidebar.

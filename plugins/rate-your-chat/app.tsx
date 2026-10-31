@@ -65,7 +65,7 @@ function FeedbackForm({
     });
   return (
     <form
-      className="space-y-5"
+      className="space-y-3 sm:space-y-5"
       onSubmit={(event) => {
         event.preventDefault();
         if (score && useCases.length && !pending)
@@ -73,20 +73,20 @@ function FeedbackForm({
       }}
     >
       {draftedByAgent ? (
-        <p className="rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
+        <p className="rounded-lg bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">
           Drafted by an agent in this chat. Check the score and note before
           saving.
         </p>
       ) : null}
       <fieldset disabled={pending} className="space-y-2">
-        <legend className="mb-2 text-sm font-medium">
+        <legend className="mb-1.5 text-xs font-medium sm:mb-2 sm:text-sm">
           How useful was this chat?
         </legend>
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
           {SCORE_LABELS.map((label, index) => (
             <label
               key={label}
-              className={`flex cursor-pointer flex-col items-center gap-1 rounded-lg border p-2 text-center text-sm ${score === index + 1 ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-muted"}`}
+              className={`flex min-h-11 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-lg border p-1.5 text-center text-xs sm:min-h-0 sm:gap-1 sm:p-2 sm:text-sm ${score === index + 1 ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-muted"}`}
             >
               <input
                 className="sr-only peer"
@@ -98,31 +98,31 @@ function FeedbackForm({
                 aria-label={`${index + 1}, ${label}`}
                 required
               />
-              <span className="rounded px-1 text-lg font-semibold peer-focus-visible:ring-2 peer-focus-visible:ring-ring">
+              <span className="rounded px-1 text-base font-semibold peer-focus-visible:ring-2 peer-focus-visible:ring-ring sm:text-xl">
                 {index + 1}
               </span>
             </label>
           ))}
         </div>
-        <div className="flex justify-between text-xs text-muted-foreground">
+        <div className="flex justify-between text-[11px] text-muted-foreground">
           <span>Not useful</span>
           <span>Very useful</span>
         </div>
       </fieldset>
       <fieldset disabled={pending} className="space-y-2">
-        <legend className="mb-2 text-sm font-medium">
+        <legend className="mb-1.5 text-xs font-medium sm:mb-2 sm:text-sm">
           What was it for?{" "}
           <span className="font-normal text-muted-foreground">
             (select all that apply)
           </span>
         </legend>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5 sm:gap-2">
           {USE_CASES.map((value) => {
             const selected = useCases.includes(value);
             return (
               <label
                 key={value}
-                className={`cursor-pointer rounded-lg border px-3 py-1.5 text-sm ${selected ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-muted"}`}
+                className={`inline-flex min-h-11 cursor-pointer items-center rounded-lg border px-2.5 text-xs sm:min-h-0 sm:px-3 sm:py-1.5 sm:text-sm ${selected ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:bg-muted"}`}
               >
                 <input
                   className="sr-only peer"
@@ -146,7 +146,10 @@ function FeedbackForm({
         ) : null}
       </fieldset>
       <div className="space-y-2">
-        <label htmlFor={`${id}-note`} className="text-sm font-medium">
+        <label
+          htmlFor={`${id}-note`}
+          className="text-xs font-medium sm:text-sm"
+        >
           What worked or didn't?{" "}
           <span className="font-normal text-muted-foreground">(optional)</span>
         </label>
@@ -164,7 +167,7 @@ function FeedbackForm({
       <Button
         type="submit"
         disabled={pending || score === 0 || useCases.length === 0}
-        className="w-full"
+        className="h-11 w-full sm:h-9"
       >
         {pending ? "Saving locally…" : "Save rating"}
       </Button>
@@ -246,7 +249,7 @@ function ArchivePrompt({
         />
         <Dialog.Content
           {...portalScope}
-          className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%_-_2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-background p-6 text-foreground shadow-xl"
+          className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%_-_1rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-border bg-background p-3 text-foreground shadow-xl sm:p-6"
           onEscapeKeyDown={(event) => {
             if (pending) event.preventDefault();
           }}
@@ -254,17 +257,17 @@ function ArchivePrompt({
             if (pending) event.preventDefault();
           }}
         >
-          <div className="mb-4 flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <div className="mb-3 flex items-center gap-2 text-xs font-medium text-muted-foreground sm:mb-4">
             <Icon name="Star" className="size-4" /> ARCHIVED CHAT{" "}
             {count > 1 ? <span className="ml-auto">1 of {count}</span> : null}
           </div>
-          <Dialog.Title className="text-xl font-semibold">
+          <Dialog.Title className="text-lg font-semibold sm:text-xl">
             How did this chat go?
           </Dialog.Title>
-          <Dialog.Description className="mt-1 text-sm text-muted-foreground">
+          <Dialog.Description className="mt-0.5 text-xs text-muted-foreground sm:text-sm">
             Rate the whole conversation, not one reply. This is just for you.
           </Dialog.Description>
-          <p className="my-4 rounded-lg bg-muted px-3 py-2 text-sm font-medium break-words">
+          <p className="my-3 rounded-lg bg-muted px-2.5 py-2 text-xs font-medium break-words sm:my-4 sm:text-sm">
             {prompt.title}
           </p>
           {loaded ? (
@@ -314,14 +317,14 @@ function ArchivePrompt({
               </Button>
             </div>
           ) : null}
-          <p className="mt-4 text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-3 text-[11px] leading-relaxed text-muted-foreground sm:mt-4">
             <Icon name="Lock" className="mr-1 inline size-3" /> Saved on your BB
             server. Recorded model and reasoning variations are captured when
             you save. Nothing goes to providers.
           </p>
           <Button
             variant="ghost"
-            className="mt-2 w-full"
+            className="mt-2 h-11 w-full sm:h-9"
             disabled={pending}
             onClick={() => void dismiss()}
           >
