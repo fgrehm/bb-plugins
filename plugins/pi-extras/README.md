@@ -4,7 +4,7 @@ A BB plugin for Pi usage, global Pi settings, and Pi-powered thread titles and c
 
 - **Sessions:** estimated token usage and cost from local Pi transcripts (`~/.pi/agent/sessions`, `~/.bb/pi-bridge-sessions`, and helper traces in `~/.bb/pi-extras-sessions`), broken down by backend, model, project, and day. Adapted from [iamEvanYT/bb-usage-page](https://github.com/iamEvanYT/bb-usage-page) (MIT), vendored under `usage-page/` and scoped to Pi.
 - **Subscriptions:** live usage for Pi-managed legacy Codex, OpenCode Go, and Ollama Cloud credentials, with a short-lived cache.
-- **Pi settings:** choose standalone Pi defaults and model scope, adjust runtime settings relevant to BB threads, refresh model catalogs, and update Pi extensions.
+- **Pi settings:** choose standalone Pi defaults, tool selection (with codemode and tool search), and model scope, adjust runtime settings relevant to BB threads, refresh model catalogs, and update Pi extensions.
 - **AI services:** to activate Pi-powered thread titles or commit messages, select Pi for each task in BB Settings > AI services. These BB-level selections are separate from the per-task model choices in Pi Extras settings; BB's Automatic setting does not select third-party services.
 - **Project trust:** shows a warning segment above the thread's message box (and a sidebar badge) when Pi skipped trust-gated project resources, and saves the per-directory decision Pi's `/trust` would save, only after you press the button.
 
@@ -34,6 +34,10 @@ The Pi Extras plugin adds **Pi Usage** to BB's main sidebar and **Pi** to BB Set
 ### Runtime settings
 
 <img src="docs/runtime-settings.webp" alt="Pi runtime settings" width="640">
+
+### Tools and MCP servers
+
+<img src="docs/tools.webp" alt="Pi tools and MCP servers settings" width="640">
 
 ### Composer trust warning
 
@@ -71,7 +75,7 @@ Codex usage polling therefore requires Pi's `openai-codex` OAuth credential, inc
 
 ## Settings
 
-The Settings entry manages global Pi defaults for provider, model, thinking level, and the model scope. It can also refresh model catalogs and update Pi extensions, with command output shown in the UI. The plugin preserves unrelated Pi settings and never reads or changes credentials.
+The Settings entry manages global Pi defaults for provider, model, thinking level, the tool selection, and the model scope. It also shows Pi's user-level MCP servers read-only, and can refresh model catalogs and update Pi extensions, with command output shown in the UI. The plugin preserves unrelated Pi settings and never reads or changes credentials, and never writes `mcp.json`; `pi mcp add` remains the way to configure servers.
 
 ### Runtime settings
 
@@ -90,6 +94,14 @@ Every control is tri-state. An empty choice removes the key from `settings.json`
 The default model is a searchable list of the models Pi actually offers, read from the Pi process on the primary machine (`get_available_models` over Pi's RPC mode, with extensions loaded so extension providers appear). The list is cached in the plugin for a minute and is invalidated when you refresh the model catalogs, because Pi itself only re-reads its catalog cache when asked.
 
 The list covers providers with usable authentication, so a saved model can be missing from it because it was retired, because the catalog is stale, or because its provider is not signed in. The panel keeps such a value, marks it as not in the list, and never clears it for you; Pi falls back to one of its per-provider defaults at startup.
+
+### Tools
+
+BB threads run with Pi's tool selection, so the Tools tab edits `defaultTools` and the codemode controls beside the read-only MCP servers card for the same user-level config Pi loads.
+
+Toggling a tool never replaces Pi's default selection unless it already has: the panel writes `+name` / `-name` entries that Pi resolves against its defaults, and a toggle back removes the key entirely, which is how Pi stores "use my defaults". Distinguishing absence from an explicit selection matters: Pi reads a written `[]` as "no built-in tools", so unchecking the last tool of an explicit selection keeps an explicit `[]` rather than deleting the key. Only a selection that already contains a plain name is rewritten as plain names, because that is how Pi reads a replacing list. The written list is always visible under the collapsible.
+
+`codemode` and `tool_search` are built-in extensions that register inactive; checking them adds the tool. Codemode's `mode` and description-token budget are tri-state and preserve unmodeled `codemode.*` keys on write. The MCP card lists user-level servers from the agent directory, never expands environment values, and marks that project servers in `.pi/mcp.json` load only after the workspace is trusted. Pi warns, in its own output, when a server's non-direct tools have neither codemode nor tool search active.
 
 ### Model scope and exclusions
 
@@ -183,9 +195,10 @@ Readiness asks Pi for available models with a short timeout, and caches only pos
 
 Pi Extras edits the settings file used by the Pi executable on the host. BB launches the host's installed Pi (minimum 0.84.0), so newer settings may affect BB threads unless BB overrides them. These candidates are not exposed yet; see the [Pi 1.0.0 settings reference](https://github.com/earendil-works/pi/blob/v1.0.0/packages/coding-agent/docs/settings.md).
 
+The Tools tab implements the `defaultTools`, `codemode.mode`, and `codemode.inlineBudget` settings. The remaining candidates are not exposed yet; see the [Pi 1.0.0 settings reference](https://github.com/earendil-works/pi/blob/v1.0.0/packages/coding-agent/docs/settings.md).
+
 | Setting | Why evaluate it | What to verify before adding it |
 |---|---|---|
-| `defaultTools`, `codemode.mode`, `codemode.inlineBudget` | Codemode is registered inactive; `defaultTools` can activate it, and its mode changes whether tools are directly exposed or reached through Codemode. The inline budget trades prompt size against how many tool declarations the model sees. | Test activation and both modes with BB's injected tools. BB reactivates those tools on session start, so confirm the resulting tool exposure and behavior before offering an advanced tools section. |
 | `retry.enabled`, `retry.maxRetries`, `retry.baseDelayMs`, `retry.maxAgentDelayMs` | They tune automatic retries when a provider fails. | Verify cancellation, steering, surfaced errors, and retry timing through BB's bridge before exposing controls. Keep provider-level retry settings separate. |
 | `websocketConnectTimeoutMs` | It controls WebSocket connection setup, distinct from the existing HTTP idle timeout. | Confirm which supported provider paths use it and whether connection timeouts have been a practical issue; otherwise Pi's default is sufficient. |
 

@@ -35,6 +35,24 @@ const nullableCount = z.number().int().nonnegative().nullable();
  * instructions, and session directory itself, and it does its own message
  * queueing, which is why the rest of Pi's global surface is left alone.
  */
+const mcpServerSchema = z.object({
+  name: z.string(),
+  /** User-level servers load in every project; project servers need trust. */
+  level: z.enum(["user", "project"]),
+  transport: z.enum(["stdio", "http"]),
+  /** stdio launch command or http url as configured; never expanded. */
+  detail: z.string().nullable(),
+}).strict();
+
+/** Read-only summary of Pi's user-level MCP config; the panel never writes mcp.json. */
+export const mcpServersSchema = z.object({
+  servers: z.array(mcpServerSchema),
+  invalid: z.array(z.string()),
+  autoEnableCodemode: z.boolean().nullable(),
+  path: z.string(),
+  error: z.string().nullable(),
+}).strict();
+
 const piSettingsSchema = z.object({
   defaultProvider: z.string().nullable(),
   defaultModel: z.string().nullable(),
@@ -49,6 +67,12 @@ const piSettingsSchema = z.object({
   shell: z.object({
     shellPath: z.string().nullable(),
     shellCommandPrefix: z.string().nullable(),
+  }).strict(),
+  /** Raw `defaultTools`; null is an absent key (pi's defaults), [] disables built-ins. */
+  defaultTools: z.array(z.string()).nullable(),
+  codemode: z.object({
+    mode: z.enum(["on", "only"]).nullable(),
+    inlineBudget: nullableCount,
   }).strict(),
   telemetry: z.object({
     enableInstallTelemetry: nullableFlag,
@@ -106,6 +130,8 @@ export const piExtrasHostContract = defineRpcContract({
   writeSettings: { input: piSettingsSchema, output: piSettingsSchema },
   update: { input: updateSchema, output: z.object({ ok: z.boolean(), output: z.string() }).strict() },
   listModels: { input: z.object({}).strict(), output: modelListSchema },
+  /** User-level MCP servers from agent-directory mcp.json, read-only. */
+  readMcpServers: { input: z.object({}).strict(), output: mcpServersSchema },
   /**
    * One bb text-completion prompt, answered by pi on the host that has pi
    * installed. `model` is a `provider/id`, or null to use pi's own default.
@@ -155,6 +181,8 @@ export const piExtrasRpcContract = defineRpcContract({
     input: z.object({ force: z.boolean().optional() }).strict(),
     output: modelListSchema,
   },
+  /** Read-only MCP servers; the panel never writes mcp.json. */
+  readMcpServers: { input: z.object({}).strict(), output: mcpServersSchema },
   /** Per-task text models; an empty commit model falls back to the title model. */
   readTitleSettings: { input: z.object({}).strict(), output: titleSettingsSchema },
   writeTitleSettings: { input: titleSettingsSchema, output: titleSettingsSchema },

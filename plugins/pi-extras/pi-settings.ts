@@ -12,6 +12,9 @@ export type PiSettings = {
   defaultModel: string | null;
   defaultThinkingLevel: ThinkingLevel | null;
   enabledModels: string[];
+  /** Absent key (pi defaults) is null; an explicit `[]` disables built-ins. */
+  defaultTools: string[] | null;
+  codemode: { mode: "on" | "only" | null; inlineBudget: number | null };
   compaction: { enabled: boolean | null; reserveTokens: number | null; keepRecentTokens: number | null };
   httpIdleTimeoutMs: number | null;
   shell: { shellPath: string | null; shellCommandPrefix: string | null };
@@ -27,6 +30,8 @@ export function unsetPiSettings(overrides: Partial<PiSettings> = {}): PiSettings
     defaultModel: null,
     defaultThinkingLevel: null,
     enabledModels: [],
+    defaultTools: null,
+    codemode: { mode: null, inlineBudget: null },
     compaction: { enabled: null, reserveTokens: null, keepRecentTokens: null },
     httpIdleTimeoutMs: null,
     shell: { shellPath: null, shellCommandPrefix: null },
@@ -43,12 +48,14 @@ const PATHS = {
   httpIdleTimeoutMs: "httpIdleTimeoutMs",
   shellPath: "shellPath",
   shellCommandPrefix: "shellCommandPrefix",
+  codemodeMode: "codemode.mode",
+  codemodeInlineBudget: "codemode.inlineBudget",
   enableInstallTelemetry: "enableInstallTelemetry",
   enableAnalytics: "enableAnalytics",
 } as const;
 
 /** Nested groups the panel owns; only these are pruned when they end up empty. */
-const MANAGED_GROUPS = ["compaction"] as const;
+const MANAGED_GROUPS = ["compaction", "codemode"] as const;
 
 function leaf(raw: JsonRecord, path: string): unknown {
   return path.split(".").reduce<unknown>(
@@ -115,6 +122,16 @@ export async function readSettings(env = process.env): Promise<PiSettings> {
       shellPath: typeof raw.shellPath === "string" ? raw.shellPath : null,
       shellCommandPrefix: typeof raw.shellCommandPrefix === "string" ? raw.shellCommandPrefix : null,
     },
+    // A present but non-array value is pi's empty selection (getDefaultTools
+    // resolves it through []), not the absence sentinel.
+    defaultTools: Array.isArray(raw.defaultTools) ? raw.defaultTools.filter((value): value is string => typeof value === "string") : raw.defaultTools === undefined ? null : [],
+    codemode: (() => {
+      const codemodeRaw = typeof raw.codemode === "object" && raw.codemode !== null ? raw.codemode as JsonRecord : null;
+      return {
+        mode: codemodeRaw !== null && (codemodeRaw.mode === "on" || codemodeRaw.mode === "only") ? codemodeRaw.mode : null,
+        inlineBudget: asCount(codemodeRaw === null ? undefined : codemodeRaw.inlineBudget),
+      };
+    })(),
     telemetry: {
       enableInstallTelemetry: asFlag(leaf(raw, PATHS.enableInstallTelemetry)),
       enableAnalytics: asFlag(leaf(raw, PATHS.enableAnalytics)),
@@ -127,10 +144,16 @@ export async function writeSettings(next: PiSettings, env = process.env): Promis
   let current: JsonRecord = {};
   try { current = JSON.parse(await readFile(path, "utf8")) as JsonRecord; } catch {}
   const updated: JsonRecord = { ...current };
-  for (const key of ["defaultProvider", "defaultModel", "defaultThinkingLevel", "enabledModels"] as const) {
-    if (next[key] === null || (key === "enabledModels" && next[key].length === 0)) delete updated[key];
+  for (const key of ["defaultProvider", "defaultModel", "defaultThinkingLevel"] as const) {
+    if (next[key] === null) delete updated[key];
     else updated[key] = next[key];
   }
+  if (next.enabledModels === undefined || next.enabledModels.length === 0) delete updated["enabledModels"];
+  else updated["enabledModels"] = next.enabledModels;
+  // Only an absent key (null) removes defaultTools; an explicit [] stays, so pi
+  // keeps built-in tools disabled.
+  if (next.defaultTools === null) delete updated["defaultTools"];
+  else updated["defaultTools"] = next.defaultTools;
 
   // A null value removes the key so pi applies its own default.
   const write = (path: string, value: string | number | boolean | null) =>
@@ -142,6 +165,8 @@ export async function writeSettings(next: PiSettings, env = process.env): Promis
   write(PATHS.httpIdleTimeoutMs, next.httpIdleTimeoutMs);
   write(PATHS.shellPath, next.shell.shellPath);
   write(PATHS.shellCommandPrefix, next.shell.shellCommandPrefix);
+  write(PATHS.codemodeMode, next.codemode?.mode ?? null);
+  write(PATHS.codemodeInlineBudget, next.codemode?.inlineBudget ?? null);
   write(PATHS.enableInstallTelemetry, next.telemetry.enableInstallTelemetry);
   write(PATHS.enableAnalytics, next.telemetry.enableAnalytics);
   pruneEmptyGroups(updated, MANAGED_GROUPS);

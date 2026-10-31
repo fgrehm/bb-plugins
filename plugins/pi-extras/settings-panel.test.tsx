@@ -167,3 +167,97 @@ describe("PiSettingsPanel", () => {
     })));
   });
 });
+
+describe("PiSettingsPanel Tools tab", () => {
+  afterEach(() => {
+    cleanup();
+    rpc.call.mockReset();
+  });
+
+  const TOOLS_BASE = unsetPiSettings({ defaultTools: null, codemode: { mode: null, inlineBudget: null } });
+
+  it("returns to an absent key when the last modifier chip is removed", async () => {
+    setup({ ...TOOLS_BASE, defaultTools: ["+opencode-tools/read"] });
+    await screen.findByRole("button", { name: "Models" });
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    await screen.findByRole("checkbox", { name: "read" });
+    fireEvent.click(screen.getByRole("button", { name: "Remove entry +opencode-tools/read" }));
+    expect(screen.getByText("(no defaultTools key: Pi uses its default selection)")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(rpc.call).toHaveBeenCalledWith("writeSettings", expect.objectContaining({
+      defaultTools: null,
+    })));
+  });
+
+  it("keeps a written [] when the last entry of an explicit selection is removed", async () => {
+    setup({ ...TOOLS_BASE, defaultTools: ["read"] });
+    await screen.findByRole("button", { name: "Models" });
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    const read = await screen.findByRole("checkbox", { name: "read" });
+    fireEvent.click(read);
+    // Unchecking the last plain tool resolves to pi's explicit emptiness.
+    expect(screen.getByText('[]')).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(rpc.call).toHaveBeenCalledWith("writeSettings", expect.objectContaining({
+      defaultTools: [],
+    })));
+  });
+
+  it("writes relative entries and the codemode keys on the shared draft", async () => {
+    setup(TOOLS_BASE);
+    await screen.findByRole("button", { name: "Models" });
+    fireEvent.click(screen.getByRole("button", { name: "Tools" }));
+    const bash = await screen.findByRole("checkbox", { name: "bash" });
+    fireEvent.click(bash);
+    expect(screen.getByText('["-bash"]')).not.toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: /codemode tool presentation/i }), {
+      target: { value: "only" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(rpc.call).toHaveBeenCalledWith("writeSettings", expect.objectContaining({
+      defaultTools: ["-bash"],
+      codemode: { mode: "only", inlineBudget: null },
+    })));
+  });
+});
+
+describe("PiSettingsPanel MCP card branches", () => {
+  afterEach(() => {
+    cleanup();
+    rpc.call.mockReset();
+  });
+
+  it("does not claim autoEnableCodemode is off when it is not", async () => {
+    rpc.call.mockImplementation(async (name: string) => {
+      if (name === "readMcpServers") {
+        return { servers: [{ name: "docs", level: "user", transport: "http", detail: "https://example.org/mcp" }], autoEnableCodemode: true, path: "/pi/mcp.json", error: null, invalid: [] };
+      }
+      if (name === "listModels") return { models: [], error: null };
+      if (name === "readSettings") return unsetPiSettings({ defaultTools: null, codemode: { mode: null, inlineBudget: null } });
+      if (name === "readTitleSettings") return { titleModel: "", commitModel: "" };
+      if (name === "titleServiceStatus") return { ready: true };
+      throw new Error(`unexpected call ${name}`);
+    });
+    const { PiSettingsPanel: Panel } = await import("./settings-panel");
+    render(<Panel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Tools" }));
+    expect(await screen.findByText(/may also activate codemode or tool search itself/i)).not.toBeNull();
+  });
+
+  it("states that automatic codemode activation is off when the file says false", async () => {
+    rpc.call.mockImplementation(async (name: string) => {
+      if (name === "readMcpServers") {
+        return { servers: [{ name: "docs", level: "user", transport: "http", detail: "https://example.org/mcp" }], autoEnableCodemode: false, path: "/pi/mcp.json", error: null, invalid: [] };
+      }
+      if (name === "listModels") return { models: [], error: null };
+      if (name === "readSettings") return unsetPiSettings({ defaultTools: null, codemode: { mode: null, inlineBudget: null } });
+      if (name === "readTitleSettings") return { titleModel: "", commitModel: "" };
+      if (name === "titleServiceStatus") return { ready: true };
+      throw new Error(`unexpected call ${name}`);
+    });
+    const { PiSettingsPanel: Panel } = await import("./settings-panel");
+    render(<Panel />);
+    fireEvent.click(await screen.findByRole("button", { name: "Tools" }));
+    expect(await screen.findByText(/Automatic codemode activation is off here/i)).not.toBeNull();
+  });
+});

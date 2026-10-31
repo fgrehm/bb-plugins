@@ -2,12 +2,10 @@
 
 ## 2026-10-30
 
-### Changed
-
-- Split the Pi settings section into Models, Runtime, Titles & commits, and Maintenance tabs with a shared save bar, replacing the nested collapse cards and moving the model scope next to the model defaults it interacts with, and trim the surrounding copy.
-
 ### Added
 
+- Add a Tools tab: toggle Pi's startup tools against its defaults without ever replacing the default selection implicitly, enable codemode and tool search, set codemode's mode and description-token budget, see unmodeled `+`/`-` entries verbatim, and a read-only card listing Pi's user-level MCP servers, never writing `mcp.json`.
+- Keep the tab row horizontally scrollable so the settings sections fit a phone width.
 - Warn when a Pi thread's workspace has trust-gated resources but no saved Pi project-trust decision: a warning segment above the message box, a sidebar row badge, a first-turn agent notice naming the skipped paths, and a thread panel with an explicit **Trust <workspace> for Pi** action that writes Pi's per-directory decision exactly as `pi /trust` does.
 - Read Pi's trust store and `defaultProjectTrust` read-only, mirroring Pi's own resource scan, parent lookup, and canonicalization; the store is written only on the panel's button press.
 - Add a Refresh control that bypasses the plugin and host caches and re-reads trust state, including from the unknown and no-resources states.

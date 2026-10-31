@@ -149,6 +149,11 @@ export default function plugin(bb: BbPluginApi): void {
       cachedModels = { fetchedAt: Date.now(), result };
       return result;
     },
+    async readMcpServers() {
+      const hostId = (await bb.sdk.system.config()).primaryHostId;
+      if (!hostId) throw new Error("No primary BB machine is configured.");
+      return host.call("readMcpServers", {}, { hostId });
+    },
     async titleServiceStatus() {
       return probeTitleService();
     },

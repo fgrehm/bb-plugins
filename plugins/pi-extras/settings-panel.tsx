@@ -15,16 +15,18 @@ import {
 import { UpdateActions } from "./update-actions";
 import { BehaviorSettings } from "./behavior-settings";
 import { TextServiceSettings } from "./title-service-settings";
+import { KNOWN_TOOLS, OTHER_BUILTIN_TOOLS, PI_DEFAULT_TOOLS, BUILTIN_INACTIVE, applyToolToggle, toolsState, type ToolsState } from "./pi-tools";
 
 const FIELD_CLASS = "w-full rounded-md border border-input bg-background px-2 py-1";
 /** Sentinel for a saved model that Pi's available list does not contain. */
 const UNAVAILABLE = "(not available)";
 
-type Tab = "models" | "runtime" | "titles" | "maintenance";
+type Tab = "models" | "runtime" | "tools" | "titles" | "maintenance";
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: "models", label: "Models" },
   { id: "runtime", label: "Runtime" },
+  { id: "tools", label: "Tools" },
   { id: "titles", label: "Titles & commits" },
   { id: "maintenance", label: "Maintenance" },
 ];
@@ -69,14 +71,14 @@ function placeholderModel(reference: string): PiModelSummary {
 }
 
 function SettingsTabs({ active, onSelect }: { active: Tab; onSelect: (tab: Tab) => void }) {
-  return <nav aria-label="Pi settings sections" className="flex gap-1 border-b border-border">
+  return <nav aria-label="Pi settings sections" className="flex gap-1 overflow-x-auto border-b border-border">
     {TABS.map((entry) => (
       <button
         key={entry.id}
         type="button"
         onClick={() => onSelect(entry.id)}
         aria-current={active === entry.id ? "page" : undefined}
-        className={`rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors ${active === entry.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+        className={`shrink-0 whitespace-nowrap rounded-t-md border-b-2 px-3 py-2 text-sm font-medium transition-colors ${active === entry.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
       >
         {entry.label}
       </button>
@@ -420,6 +422,210 @@ function ModelsTab({
   </div>;
 }
 
+type McpServer = { name: string; level: "user" | "project"; transport: "stdio" | "http"; detail: string | null };
+
+type McpReport = {
+  servers: McpServer[];
+  autoEnableCodemode: boolean | null;
+  path: string;
+  error: string | null;
+  invalid: string[];
+};
+
+function ToolsTab({
+  draft,
+  onChange,
+}: {
+  draft: PiSettings;
+  onChange: (next: PiSettings) => void;
+}): ReactNode {
+  const rpc = useRpc<typeof piExtrasRpcContract>();
+  const [mcp, setMcp] = useState<McpReport | null>(null);
+  useEffect(() => {
+    void rpc.call("readMcpServers", {}).then(setMcp).catch((error) => setMcp({
+      servers: [], autoEnableCodemode: null, path: "", error: error instanceof Error ? error.message : String(error), invalid: [],
+    }));
+  }, [rpc]);
+
+  const state = toolsState(draft.defaultTools);
+  const setDefaultTools = (list: string[] | null) => onChange({ ...draft, defaultTools: list });
+  const toggle = (name: string, next: boolean) => setDefaultTools(applyToolToggle(draft.defaultTools, name, next));
+
+  const resolved = state.inherited
+    ? "Pi's default tools are enabled (read, bash, edit, write)."
+    : `${state.active.length} tools enabled in the written selection.`;
+
+  return <div className="space-y-5 pt-4">
+    <p className="text-xs text-muted-foreground">
+      Pi starts BB threads with its own tool selection; BB picks the model and instructions itself.
+      Checking a tool keeps Pi's defaults and adds or removes exactly that tool.
+    </p>
+
+    <section className="space-y-2">
+      <h3 className="font-medium">Enabled at startup</h3>
+      <p className="text-xs text-muted-foreground">{resolved}</p>
+      <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+        {[PI_DEFAULT_TOOLS, OTHER_BUILTIN_TOOLS].flat().map((tool) => (
+          <label key={tool} className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={state.activeSet.has(tool)}
+              onChange={(event) => toggle(tool, event.target.checked)}
+            />
+            <span className="font-mono">{tool}</span>
+          </label>
+        ))}
+      </div>
+    </section>
+
+    <section className="space-y-2">
+      <h3 className="font-medium">Indirect reach</h3>
+      <div className="space-y-1">
+        {BUILTIN_INACTIVE.map((tool) => (
+          <label key={tool} className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={state.activeSet.has(tool)}
+              onChange={(event) => toggle(tool, event.target.checked)}
+            />
+            <span className="font-mono">{tool}</span>
+            <span className="text-muted-foreground">
+              {tool === "codemode"
+                ? "the model reaches tools by writing sandboxed scripts"
+                : "the model finds undeclared tools by search"}
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="space-y-1">
+          <span className={"block text-xs font-medium text-muted-foreground"}>Codemode tool presentation</span>
+          <select
+            className={FIELD_CLASS}
+            value={draft.codemode.mode ?? ""}
+            onChange={(event) => onChange({ ...draft, codemode: { ...draft.codemode, mode: (event.target.value || null) as "on" | "only" | null } })}
+          >
+            <option value="">Pi default (on)</option>
+            <option value="on">on: declared tools stay listed</option>
+            <option value="only">only: tools reachable through codemode</option>
+          </select>
+        </label>
+        <label className="space-y-1">
+          <span className={"block text-xs font-medium text-muted-foreground"}>Codemode description token budget</span>
+          <input
+            className={FIELD_CLASS}
+            type="number"
+            min={0}
+            step={1}
+            value={draft.codemode.inlineBudget === null ? "" : String(draft.codemode.inlineBudget)}
+            placeholder="Pi uses 3000"
+            onChange={(event) => {
+              const raw = event.target.value.trim();
+              if (raw === "") return onChange({ ...draft, codemode: { ...draft.codemode, inlineBudget: null } });
+              const parsed = Number(raw);
+              onChange({ ...draft, codemode: { ...draft.codemode, inlineBudget: Number.isInteger(parsed) && parsed >= 0 ? parsed : null } });
+            }}
+          />
+        </label>
+      </div>
+    </section>
+
+    <McpServersCard mcp={mcp} active={state} />
+
+    {state.unmodeledModifiers.length > 0 ? (
+      <div className="space-y-2">
+        <p className="text-xs text-muted-foreground">
+          These reference tools the panel does not model, such as extension tools. They are kept as written.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {state.unmodeledModifiers.map((entry) => (
+            <span key={entry} className="flex items-center gap-1 rounded-md border border-border px-2 py-0.5 font-mono text-xs">
+              {entry}
+              <button
+                type="button"
+                className="underline underline-offset-2"
+                onClick={() => {
+                  const remaining = (draft.defaultTools ?? []).filter((candidate) => candidate !== entry);
+                  // Removing the last entry of an inherited (pi-defaults or
+                  // modifier-only) list returns to the absent key; removing
+                  // entries from an explicit selection keeps an explicit list,
+                  // even when that is an empty one.
+                  const inheritedish = draft.defaultTools === null || !draft.defaultTools.some((candidate) => candidate !== entry && !candidate.startsWith("+") && !candidate.startsWith("-"));
+                  setDefaultTools(remaining.length === 0 && inheritedish ? null : remaining);
+                }}
+                aria-label={`Remove entry ${entry}`}
+              >
+                remove
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
+    ) : null}
+
+    <details className="text-xs">
+      <summary className="cursor-pointer">List written to settings.json</summary>
+      <pre className="mt-1 overflow-x-auto rounded-md border border-border bg-muted p-2 font-mono">
+        {draft.defaultTools === null
+          ? "(no defaultTools key: Pi uses its default selection)"
+          : JSON.stringify(draft.defaultTools)}
+      </pre>
+    </details>
+  </div>;
+}
+
+function McpServersCard({ mcp, active }: { mcp: McpReport | null; active: ToolsState }) {
+  const selected = active.activeSet.has("codemode") || active.activeSet.has("tool_search");
+  // Pi also activates codemode itself when a server with codemode exposure
+  // connects, and tool search for deferred exposure, unless the file's
+  // autoEnableCodemode is explicitly false.
+  const autoActive = mcp !== null && mcp.error === null && mcp.servers.length > 0 && mcp.autoEnableCodemode !== false;
+  return <section className="space-y-2 rounded-md border border-border p-3">
+    <h3 className="font-medium">MCP servers</h3>
+    {mcp === null ? <p className="text-xs text-muted-foreground" role="status">Loading MCP servers...</p>
+      : mcp.error !== null ? <p role="status" className="text-xs text-destructive">{mcp.error}</p>
+        : (
+          <>
+            {mcp.servers.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                None configured. Pi&apos;s own docs and tools cover the model&apos;s work without MCP.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {mcp.servers.map((server) => (
+                  <div key={server.name} className="flex flex-wrap items-baseline gap-2 text-xs">
+                    <span className="font-mono">{server.name}</span>
+                    <span className="text-muted-foreground">{server.transport}</span>
+                    {server.detail !== null ? <span className="truncate text-muted-foreground">{server.detail}</span> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+            {mcp.invalid.length > 0 ? (
+              <p role="status" className="text-xs text-destructive">
+                Pi skips these malformed entries until they are fixed:
+                {mcp.invalid.map((entry) => <span key={entry} className="ml-1 font-mono">{entry}</span>)}
+              </p>
+            ) : null}
+          </>
+        )}
+    {mcp !== null && mcp.error === null && mcp.servers.length > 0 && !selected ? (
+      <p className="text-xs text-muted-foreground">
+        These tools are not explicitly selected, so a server&apos;s tools are reachable when
+        the server declares them directly.{autoActive
+          ? " Pi may also activate codemode or tool search itself, based on the server's exposure."
+          : " Automatic codemode activation is off here (autoEnableCodemode is false); tool search may still activate for servers with deferred exposure."}
+        Enable one above and save for a static choice.
+      </p>
+    ) : (
+      <p className="text-xs text-muted-foreground">
+        Servers are configured with <code>pi mcp add</code> and shown read-only here;
+        project servers in <code>.pi/mcp.json</code> load after this workspace is trusted.
+      </p>
+    )}
+  </section>;
+}
+
 export function PiSettingsPanel() {
   const rpc = useRpc<typeof piExtrasRpcContract>();
   const [tab, setTab] = useState<Tab>("models");
@@ -577,6 +783,7 @@ export function PiSettingsPanel() {
           <BehaviorSettings draft={draft} onChange={setDraft} />
         </div>
       ) : null}
+      {tab === "tools" ? <ToolsTab draft={draft} onChange={setDraft} /> : null}
       {tab === "titles" ? (
         <div className="pt-4">
           <TextServiceSettings models={models} />
